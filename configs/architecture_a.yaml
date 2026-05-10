@@ -1,0 +1,33 @@
+# Architecture A — centralized.
+#
+# All telemetry flows to a single monitor on the ground station.
+# Single point of failure: if the GS process is unreachable, no
+# detection happens. Recovery is not automated.
+#
+# Used as one of two baselines against which CSMA (architecture C)
+# is evaluated.
+
+architecture: A
+
+monitors:
+  - location: ground_station
+    watches:
+      - uav_0
+      - uav_1
+      - uav_2
+    detectors:
+      - heartbeat
+      - command
+      - gps
+
+mesh:
+  enabled: false
+  transport: noop
+
+recovery:
+  enabled: false
+  coordinator_election: none
+
+isolation:
+  enforcement: ground_station_command
+

@@ -1,0 +1,49 @@
+# Experiment configuration shared across all three architectures.
+#
+# Mission: a coordinated waypoint flight in PX4 SITL. Coordinates are
+# given as local NED offsets from each UAV's home position so the same
+# trajectory pattern works regardless of where Gazebo places spawns.
+#
+# Telemetry endpoints: PX4 SITL instance i exposes its onboard MAVLink
+# stream on udpin:127.0.0.1:14540+i with sysid i+1.
+#
+# Attacks: three representative cases enumerated in dissertation §3.5.3.
+#
+# Runs counts: 10 baseline + 10 per attack-arch combo gives 10 + 90 =
+# 100 trials per architecture and 300 trials total. With ~6 min wall
+# time per trial this is roughly 30 hours of actual SITL time, plan
+# 2-3 days with overhead.
+
+mission:
+  type: coordinated_waypoint
+  duration_sec: 300
+
+  # Square trajectory at 20 m altitude. Edge length 30 m.
+  waypoints:
+    - {north_m:  0.0, east_m:  0.0, alt_m: 20.0}
+    - {north_m: 30.0, east_m:  0.0, alt_m: 20.0}
+    - {north_m: 30.0, east_m: 30.0, alt_m: 20.0}
+    - {north_m:  0.0, east_m: 30.0, alt_m: 20.0}
+    - {north_m:  0.0, east_m:  0.0, alt_m: 20.0}
+
+telemetry:
+  endpoints:
+    - uav_id: uav_0
+      endpoint: udpin:127.0.0.1:14540
+      sysid: 1
+    - uav_id: uav_1
+      endpoint: udpin:127.0.0.1:14541
+      sysid: 2
+    - uav_id: uav_2
+      endpoint: udpin:127.0.0.1:14542
+      sysid: 3
+
+attacks:
+  - comm_disruption
+  - command_injection
+  - gps_spoofing
+
+runs:
+  baseline_per_arch: 10
+  attacks_per_arch_per_attack: 10
+  observation_after_attack_sec: 60.0

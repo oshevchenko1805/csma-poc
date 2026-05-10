@@ -1,0 +1,33 @@
+# Architecture B — segmented / distributed without self-healing.
+#
+# Each UAV runs its own monitor on its own telemetry. Detection and
+# isolation are local. No mesh: peers do not exchange security
+# context. No automated recovery: a self-isolated node remains
+# isolated for the rest of the run.
+#
+# Used as the second baseline.
+
+architecture: B
+
+monitors:
+  - location: uav_0
+    watches: [uav_0]
+    detectors: [heartbeat, command, gps]
+  - location: uav_1
+    watches: [uav_1]
+    detectors: [heartbeat, command, gps]
+  - location: uav_2
+    watches: [uav_2]
+    detectors: [heartbeat, command, gps]
+
+mesh:
+  enabled: false
+  transport: noop
+
+recovery:
+  enabled: false
+  coordinator_election: none
+
+isolation:
+  enforcement: local_self
+
