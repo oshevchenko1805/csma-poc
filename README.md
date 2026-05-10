@@ -34,11 +34,12 @@ detectors/               heartbeat, command, gps, cross_check
 decision/                Pure-strategy deciders (isolation, recovery)
 enforcement/             Side-effectful enforcers + handlers
   handlers/              restart_process, mode_loiter, filter_commands
-runners/                 monitor, coordinator, factory
+runners/                 monitor, coordinator, factory, missions, experiment
+attacks/                 base (ABC + Null); concrete attacks pending (step 9)
 configs/                 architecture_{a,b,c}.yaml + experiment.yaml
 scripts/                 smoke_telemetry.py (live PX4 verification)
-tests/                   Unit + integration tests (~312 currently)
-PROJECT_STATE.md         Where we are in the 12-step build plan
+tests/                   Unit + integration tests (326 passing)
+PROJECT_STATE.md         Full handoff document for new chat sessions
 ```
 
 ## Quick start
@@ -75,15 +76,23 @@ python scripts/smoke_telemetry.py
    return Events (or None). Side effects live in Enforcers and
    Handlers.
 4. **DI seams at every side-effect boundary.** `ProcessRunner`,
-   `MavsdkRunner`, `connection_factory`, `mesh_factory` — so the same
-   classes run unit tests without subprocess / MAVSDK / sockets and
-   integration tests against real PX4.
+   `MavsdkRunner`, `connection_factory`, `mesh_factory`,
+   `AttackInjector`, `MissionRunner` — so the same classes run unit
+   tests without subprocess / MAVSDK / sockets and integration tests
+   against real PX4.
 
 ## Status
 
-**Structural code complete through step 8.6a** (factory). See
-`PROJECT_STATE.md` for the 12-step plan and the next steps (8.6b
-experiment runner, then attacks + integration + full experiment run).
+**Structural code complete through step 8.6b** (experiment runner).
+326 tests passing. Remaining work:
+
+- Step 9: concrete attack injectors (`comm_disruption`,
+  `command_injection`, `gps_spoofing`)
+- Step 10: first end-to-end integration with live PX4 SITL
+- Step 11: 3×3 architecture × attack matrix smoke
+- Step 12: full 100-runs-per-architecture experiment + analyzer
+
+See `PROJECT_STATE.md` for the full handoff document.
 
 ## License
 
