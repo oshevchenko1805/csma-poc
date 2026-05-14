@@ -1,8 +1,8 @@
 # CSMA PoC — Multi-UAV Self-Healing Cybersecurity Mesh Architecture
 
 Practical part of a PhD dissertation evaluating a Cybersecurity Mesh
-Architecture (CSMA) with self-healing for multi-UAV swarms against two
-baselines.
+Architecture (CSMA) with self-healing for multi-UAV swarms against
+two baselines.
 
 ## Three architectures
 
@@ -20,11 +20,12 @@ transport, recovery on/off, and enforcer type. The factory
 
 ## Three attack cases
 
-- **`comm_disruption`** — heartbeat loss via iptables rules (PoC
+- **`comm_disruption`** — heartbeat loss via iptables DROP rule (PoC
   proxy for jamming / link failure)
-- **`command_injection`** — MAVLink command with spoofed sysid
-- **`gps_spoofing`** — EKF position-horizontal residual divergence
-  via SITL parameter manipulation
+- **`command_injection`** — periodic MAVLink commands with spoofed
+  sysid via background asyncio task
+- **`gps_spoofing`** — PX4 SITL `SIM_GPS_NOISE` parameter manipulation
+  via MAVSDK Param API
 
 ## Project structure
 
@@ -34,11 +35,13 @@ detectors/               heartbeat, command, gps, cross_check
 decision/                Pure-strategy deciders (isolation, recovery)
 enforcement/             Side-effectful enforcers + handlers
   handlers/              restart_process, mode_loiter, filter_commands
-runners/                 monitor, coordinator, factory, missions, experiment
-attacks/                 base (ABC + Null); concrete attacks pending (step 9)
+runners/                 monitor, coordinator, factory, missions,
+                         mission_mavsdk, experiment
+attacks/                 base, comm_disruption, command_injection, gps_spoofing
+metrics/                 analyzer (MTTD/MTTR/FP/FN/impact)
 configs/                 architecture_{a,b,c}.yaml + experiment.yaml
 scripts/                 smoke_telemetry.py (live PX4 verification)
-tests/                   Unit + integration tests (326 passing)
+tests/                   24 test files, 422 passing
 PROJECT_STATE.md         Full handoff document for new chat sessions
 ```
 
@@ -54,6 +57,7 @@ pip install -r requirements.txt
 
 # 2. Run unit tests (no PX4 needed for these)
 python -m pytest tests/ -q
+# Expected: 422 passed
 
 # 3. Live smoke test against PX4 SITL
 #    Requires PX4-Autopilot + Gazebo running:
@@ -76,23 +80,24 @@ python scripts/smoke_telemetry.py
    return Events (or None). Side effects live in Enforcers and
    Handlers.
 4. **DI seams at every side-effect boundary.** `ProcessRunner`,
-   `MavsdkRunner`, `connection_factory`, `mesh_factory`,
-   `AttackInjector`, `MissionRunner` — so the same classes run unit
-   tests without subprocess / MAVSDK / sockets and integration tests
-   against real PX4.
+   `MavsdkRunner`, `IptablesRunner`, `MavlinkSender`,
+   `GpsSpoofingRunner`, `DroneController`, `connection_factory`,
+   `mesh_factory` — so unit tests run without subprocess / MAVSDK /
+   sockets / iptables / network, and integration tests use real PX4.
 
 ## Status
 
-**Structural code complete through step 8.6b** (experiment runner).
-326 tests passing. Remaining work:
+**All non-PX4 code complete.** 422 tests passing. Remaining work is
+**live PX4 integration** only:
 
-- Step 9: concrete attack injectors (`comm_disruption`,
-  `command_injection`, `gps_spoofing`)
-- Step 10: first end-to-end integration with live PX4 SITL
+- Step 10: first end-to-end run (Architecture C + comm_disruption +
+  real PX4 SITL)
 - Step 11: 3×3 architecture × attack matrix smoke
-- Step 12: full 100-runs-per-architecture experiment + analyzer
+- Step 12: full 100-runs-per-architecture experiment + plots
 
-See `PROJECT_STATE.md` for the full handoff document.
+See `PROJECT_STATE.md` for the full handoff document, including the
+expected blockers at step 10 (sudo / port conflicts / home-position
+GPS lock timing).
 
 ## License
 

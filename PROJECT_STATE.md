@@ -12,9 +12,8 @@ together contain everything needed to continue.
 swarm cybersecurity PoC evaluating a self-healing Cybersecurity Mesh
 Architecture (CSMA) against two baselines.
 
-**Status**: Structural code complete (steps 5–8.6b). **326 tests
-passing**. The remaining work is concrete attack injection and live
-PX4 SITL integration runs.
+**Status**: **All non-PX4 code complete.** 422 tests passing. What
+remains is **only live PX4 integration runs** — step 10 forward.
 
 **User**: V, PhD researcher, writing in Ukrainian. The dissertation is
 a monograph. Chapters 2–3 are complete and reviewed. This repo is the
@@ -88,7 +87,7 @@ architecture, three deployments" claim into a lie.
 │    Have DI seams (ProcessRunner, MavsdkRunner,   │
 │    mesh, etc.) so unit tests can swap fakes.     │
 ├──────────────────────────────────────────────────┤
-│  Runners (Monitor, Coordinator)                  │
+│  Runners (Monitor, Coordinator, Experiment)      │
 │    Own threading. Own logging. Wire everything.  │
 └──────────────────────────────────────────────────┘
 ```
@@ -102,11 +101,15 @@ synchronous calls.
 | Seam | Default | Used in tests |
 |------|---------|---------------|
 | `connection_factory` (factory.py) | real pymavlink | `FakeConnection` |
-| `mesh_factory` (factory.py) | ZmqMesh/NoOpMesh | `RecordingMesh` |
+| `mesh_factory` (factory.py) | ZmqMesh / NoOpMesh | `RecordingMesh` |
 | `ProcessRunner` (restart.py) | `subprocess.Popen` | `FakeProcessRunner` |
-| `MavsdkRunner` (loiter.py) | real MAVSDK with lazy import | `FakeMavsdkRunner` |
-| `MissionRunner` (missions.py) | (TBD) MavsdkMissionRunner | `NullMissionRunner` |
-| `AttackInjector` (attacks/base.py) | concrete attacks (step 9) | `RecordingInjector`, `NullAttackInjector` |
+| `MavsdkRunner` (loiter.py) | real MAVSDK (lazy import) | `FakeMavsdkRunner` |
+| `IptablesRunner` (comm_disruption) | `subprocess` with sudo | `FakeIptablesRunner` |
+| `MavlinkSender` (command_injection) | `PymavlinkSender` (lazy) | `FakeMavlinkSender` |
+| `GpsSpoofingRunner` (gps_spoofing) | MAVSDK Param API (lazy) | `FakeGpsSpoofingRunner` |
+| `DroneController` (mission_mavsdk) | `MavsdkDroneController` (lazy) | `FakeDroneController` |
+| `MissionRunner` (missions.py) | `MavsdkMissionRunner` | `NullMissionRunner` |
+| `AttackInjector` (attacks/base.py) | concrete attacks | `NullAttackInjector`, `RecordingInjector` |
 
 ---
 
@@ -119,177 +122,101 @@ synchronous calls.
   `PeerPositionAnnounce`
 - `core/logger.py` — JSONL `EventLogger` (thread-safe), `read_jsonl`,
   `merge_jsonl` for post-hoc analysis
-- `core/mesh.py` — `MeshBus` ABC + `NoOpMesh` + `ZmqMesh` (PUB/SUB,
-  brokerless, with slow-joiner workaround)
-- `core/telemetry.py` — `TelemetryListener` with sysid+type whitelist,
-  injects `_src_sysid` into `event.data`
-- `core/config.py` — typed config loader (`ArchitectureConfig`,
-  `ExperimentConfig`) with strict invariants
+- `core/mesh.py` — `MeshBus` ABC + `NoOpMesh` + `ZmqMesh`
+- `core/telemetry.py` — `TelemetryListener`
+- `core/config.py` — typed config loader
 - 4 YAML configs: `configs/{architecture_a,b,c,experiment}.yaml`
 - `scripts/smoke_telemetry.py` — live PX4 SITL verification
 
 ### Step 6: Detectors
-- `detectors/base.py` — `Detector` ABC with `feed`/`tick`/`reset`
-- `detectors/heartbeat.py` — 3s timeout default, hysteresis (recovery
-  cycles before re-fire)
-- `detectors/command.py` — sysid whitelist `{1, 2, 3, 255}`, no
-  hysteresis (every spoofed command fires)
-- `detectors/gps.py` — EKF `pos_horiz_ratio > 1.0` sustained 3
-  samples (≈3s with 1Hz ESTIMATOR_STATUS)
-- `detectors/cross_check.py` — does **NOT** inherit `Detector` (it
-  has a different contract `feed_peer_position`); haversine distance
-  + kinematic feasibility per peer
+- `detectors/base.py` — `Detector` ABC
+- `detectors/heartbeat.py` — 3s timeout + hysteresis
+- `detectors/command.py` — sysid whitelist `{1, 2, 3, 255}`
+- `detectors/gps.py` — EKF `pos_horiz_ratio > 1.0` sustained 3 samples
+- `detectors/cross_check.py` — peer-position kinematic feasibility
+  (does NOT inherit `Detector`; separate contract `feed_peer_position`)
 
 ### Step 7: Decision + enforcement
-- `decision/isolation.py` — severity threshold, dedup,
-  un_isolate/reset, detector→reason mapping
-- `decision/recovery.py` — `REASON_TO_ACTION` table (heartbeat_loss →
-  restart_process, command_injection → filter_commands, gps_anomaly →
-  mode_loiter, cross_check_anomaly → mode_loiter); `enabled` flag for
-  A/B
-- `enforcement/isolation.py` — `IsolationEnforcer` ABC +
-  `LocalIsolationEnforcer` (for A/B) + `MeshAnnouncingIsolationEnforcer`
-  (for C). **Composition, not inheritance.**
-- `enforcement/recovery.py` — `RecoveryExecutor` async dispatcher,
-  `ActionHandler` ABC, structured error codes, never raises
+- `decision/isolation.py` — severity threshold, dedup
+- `decision/recovery.py` — `REASON_TO_ACTION` table
+- `enforcement/isolation.py` — `LocalIsolationEnforcer` (A/B),
+  `MeshAnnouncingIsolationEnforcer` (C)
+- `enforcement/recovery.py` — `RecoveryExecutor` (async), `ActionHandler` ABC
 
-### Step 8: Runners (the big one)
+### Step 8: Runners
+- 8.1 `runners/monitor.py` — observation-only Monitor
+- 8.2 same — added isolation pipeline (decider + enforcer optional)
+- 8.3 same — added mesh + cross_check (Monitor does NOT own mesh lifecycle)
+- 8.4 `runners/coordinator.py` — election (lowest alive sysid) +
+  recovery orchestration. Uses `asyncio.run()` per recovery (PoC)
+- 8.5 `enforcement/handlers/{restart,loiter,filter}.py` — real
+  action handlers with `ProcessRunner` / `MavsdkRunner` DI seams
+- 8.6a `runners/factory.py` — configs → `WiredFleet`
+- 8.6b `runners/experiment.py` — `ExperimentRunner` orchestrator +
+  `RunResult`. Cleanup ALWAYS runs (try/finally)
+- 8.6b `runners/missions.py` — `MissionRunner` ABC + `NullMissionRunner`
+- 8.6b `attacks/base.py` — `AttackInjector` ABC + `NullAttackInjector`
 
-**8.1 Monitor — observation only.** Single-UAV scope, listener+tick
-threads under `detector_lock`, `log_telemetry` default False, buggy
-detector exceptions swallowed.
+### Step 9: Attack injectors
+- `attacks/comm_disruption.py` — iptables DROP rule via
+  `SubprocessIptablesRunner` (default uses `sudo -n`)
+- `attacks/command_injection.py` — periodic MAVLink COMMAND_LONG with
+  spoofed sysid in background asyncio task. `PymavlinkSender` wraps
+  pymavlink sync API via `asyncio.to_thread`
+- `attacks/gps_spoofing.py` — PX4 SIM_GPS_NOISE param manipulation
+  via MAVSDK Param API. arm() captures original, cleanup() restores
+- All three attacks: arm/fire/cleanup lifecycle with try/finally
+  safety; cleanup ALWAYS runs and swallows exceptions
 
-**8.2 Monitor + isolation.** Added optional `IsolationDecider` +
-`IsolationEnforcer`. Pipeline: SecurityEvent → log → decider → enforcer
-→ log. Cross-field invariant: enforcer requires decider; decider
-without enforcer is OK (diagnostic mode).
+### Mission infrastructure (for step 10)
+- `runners/mission_mavsdk.py` — `MavsdkMissionRunner` orchestrates N
+  PX4 instances via MAVSDK; `DroneController` ABC + real implementation
+  + `ned_to_gps` conversion. `start()` runs connect/takeoff/upload/start
+  in parallel via `asyncio.gather`
 
-**8.3 Monitor + mesh.** Added optional `mesh` + `CrossCheckDetector`.
-Peer-position publisher daemon thread reads last GLOBAL_POSITION_INT,
-publishes `PeerPositionAnnounce` every `peer_publish_period_sec`.
-CrossCheck requires mesh; mesh without cross_check is allowed.
-**CRITICAL**: monitor does **NOT** call `mesh.start()/stop()` — caller's
-responsibility so mesh can be shared with coordinator.
-
-**8.4 Coordinator.** Three-role object subscribed to mesh:
-- **Election** (peer_position liveness, lowest-alive-sysid)
-- **Coordinator** (isolation → RecoveryRequest if elected)
-- **Target** (recovery_req → executor → RecoveryAck)
-
-All subscribe to `recovery_ack` → `decider.mark_recovered` + optional
-`on_recovery_completed(uav_id, success)` callback.
-
-**PoC simplification**: `asyncio.run()` per recovery (short-lived
-loop). Adequate for sync handlers; may need refactor to long-lived
-loop with `run_coroutine_threadsafe` if persistent MAVSDK gRPC is
-required. Documented.
-
-**8.5 Real ActionHandlers.**
-- `enforcement/handlers/restart.py` — `RestartProcessHandler` +
-  `ProcessSpec` (frozen dataclass) + `ProcessRunner` ABC +
-  `DefaultProcessRunner` via `subprocess.Popen` with tracked handles.
-  **No `pkill` pattern matching.**
-- `enforcement/handlers/loiter.py` — `ModeLoiterHandler` +
-  `MavsdkRunner` ABC + `DefaultMavsdkRunner` with **lazy mavsdk
-  import** (tests don't need mavsdk installed). `action.hold()` = PX4
-  LOITER
-- `enforcement/handlers/filter.py` — `FilterCommandsHandler`, state-only
-  with thread-safe `set`. **PoC simplification** — real deployment
-  would be iptables / mavlink-router
-
-**8.6a Factory.** `runners/factory.py`. Reads architecture + experiment
-configs, produces `WiredFleet` (monitors, coordinators, meshes, log_dir,
-filter_handlers). **No side effects**: doesn't start threads/sockets.
-DI seams for `connection_factory` and `mesh_factory`. Architecture-C
-build wires the on_recovery_completed callback to lift local enforcer
-+ un_isolate local decider on success.
-
-**8.6b Experiment runner.** `runners/experiment.py`. Drives full
-lifecycle: build_fleet → mesh.start → monitor.start → coordinator.start
-→ mission start → wait attack_at_sec → fire → wait observation_after_attack_sec
-→ teardown (reverse order) → merge logs → write run_summary.json →
-return RunResult. **Cleanup ALWAYS runs** (try/finally).
-
-Also delivered: `attacks/base.py` (`AttackInjector` ABC +
-`NullAttackInjector` + `AttackContext`), `runners/missions.py`
-(`MissionRunner` ABC + `NullMissionRunner`).
+### Step 12 analyzer (computed metrics)
+- `metrics/analyzer.py` — `RunMetrics` (per-run) + `AggregateMetrics`
+  (across runs). Reads `merged.jsonl` + `run_summary.json`,
+  computes MTTD/MTTR/impact/FP/FN. Linear-interpolation percentiles,
+  no numpy dependency. Graceful error handling: missing/corrupt files
+  → `error` field, not exceptions
 
 ---
 
-## 5. What's not done (steps 9–12)
-
-### Step 9 — Attack injection modules
-Three concrete classes implementing `AttackInjector`:
-
-- **`attacks/comm_disruption.py`** — `iptables -A INPUT -p udp --dport
-  14540+i -j DROP` on fire, delete rule on cleanup. Requires sudo or
-  CAP_NET_ADMIN. Easiest of the three.
-- **`attacks/command_injection.py`** — open a MAVLink socket,
-  periodically send `COMMAND_LONG` (e.g. `MAV_CMD_DO_REPOSITION`)
-  with spoofed sysid (something **outside** `{1, 2, 3, 255}`). Loop
-  in a background asyncio task; cancel on cleanup.
-- **`attacks/gps_spoofing.py`** — riskiest. Options ordered by
-  reliability:
-  1. PX4 `param set SIM_GPS_NOISE_*` via MAVSDK — moves the GPS
-     reading enough to push EKF residuals over threshold
-  2. Direct `HIL_GPS` message injection via MAVLink (need to disable
-     real GPS first)
-  3. Gazebo plugin manipulation — most realistic but hardest
-
-  Recommend starting with option 1.
-
-For each: write a test using a fake transport (no real iptables / no
-real MAVLink socket) verifying arm/fire/cleanup behavior. Then a
-single live integration test in step 10.
+## 5. What's not done (only PX4-live work)
 
 ### Step 10 — First end-to-end integration test
-Pick the simplest combo: Architecture C + comm_disruption +
-real PX4 SITL. Verify:
-- Three PX4 instances launch
-- Three monitors connect, see telemetry
-- Mesh peers reach each other (cross_check fires when ground-truth
-  positions diverge)
-- iptables drops UAV-0 heartbeat
-- Monitor on UAV-0 detects heartbeat_loss within ~3s
-- Mesh propagates IsolationAnnounce
-- Coordinator on UAV-1 (lowest alive sysid) emits RecoveryRequest
-- RestartProcessHandler runs on UAV-0
-- New PX4 instance starts, heartbeats resume
-- RecoveryAck published, all peers `un_isolate(uav_0)`
+Simplest combo: **Architecture C + comm_disruption + real PX4 SITL**.
 
-Almost certainly there will be timing / port-conflict / pose-offset
-issues to discover and fix here. Allow several iterations.
+Tasks:
+- Launch 3 PX4 instances with `MavsdkMissionRunner`-compatible setup
+- Verify telemetry flows to monitors
+- Verify mesh peers reach each other (cross_check fires on real positions)
+- Trigger iptables drop → measure MTTD
+- Verify RestartProcessHandler launches new PX4 → heartbeats resume
+- Verify RecoveryAck propagates → `un_isolate` lifts
+- **Expected blockers**: port conflicts (MAVSDK vs telemetry listener
+  both want 14540?), home-position GPS lock timing, `sudo -n` for
+  iptables (CAP_NET_ADMIN setup), PX4 cold-start time
 
-Also needs **`MavsdkMissionRunner`** — concrete `MissionRunner` that
-flies all three UAVs through the coordinated waypoint pattern from
-`configs/experiment.yaml::mission.waypoints`. This is new code, not
-yet written.
+This will take several iterations of run → see error → fix → repeat.
 
 ### Step 11 — 3×3 matrix smoke
-For each (architecture, attack) combo: run one trial. 9 total. Sanity
-that nothing crashes catastrophically. Not full statistics yet.
+For each (architecture, attack) combo: 1 trial. 9 total. Sanity that
+nothing crashes catastrophically. Not full statistics yet.
 
-### Step 12 — Full experiment + analyzer
-100 runs per architecture (10 baseline + 30 per attack class × 3 =
-100). Roughly 30 wall-hours of SITL time. Then:
-
-- `metrics/analyzer.py` — reads all `merged.jsonl` files, computes:
-  - **MTTD** = first `SecurityEvent.timestamp` − `AttackEvent(inject_start).timestamp`
-    matching the same target_uav
-  - **MTTR** = first `RecoveryAck(success=True).timestamp` for
-    target_uav − `IsolationAnnounce.timestamp` for same UAV
-  - **Impact scope** = number of UAVs that emitted any
-    SecurityEvent (or some richer mission-state metric)
-  - **False positive rate** = SecurityEvents in baseline (no-attack) runs
-  - **False negative rate** = (attack runs - runs with matching
-    SecurityEvent) / attack runs
-  - **Resource overhead** = aggregate CPU%/RAM during run (gather
-    via `psutil` in experiment runner — not yet implemented)
-- Outputs: tables + plots for Chapter 5
+### Step 12 (runs portion) — Full experiment + plots
+- Run the experiment (probably 100 trials per cell, ~30 wall-hours of SITL)
+- Run analyzer over results (analyzer code is done, just point it at
+  the results directory)
+- Generate plots for Chapter 5 (matplotlib code is NOT yet written —
+  add `metrics/plots.py` in this step)
+- Optional: add `psutil` sampling to `ExperimentRunner` for resource
+  overhead (CPU%, RAM) — NOT yet wired
 
 ---
 
-## 6. File inventory (everything currently in repo)
+## 6. File inventory
 
 ```
 csma_poc_v2/
@@ -298,82 +225,86 @@ csma_poc_v2/
 ├── .gitignore
 ├── requirements.txt
 │
-├── core/
-│   ├── events.py          BaseEvent + 8 typed events with registry
-│   ├── logger.py          EventLogger (JSONL, thread-safe), read_jsonl, merge_jsonl
-│   ├── mesh.py            MeshBus ABC, NoOpMesh, ZmqMesh
-│   ├── telemetry.py       TelemetryListener (sysid+type whitelisting)
-│   └── config.py          Typed config loader with invariants
+├── core/                        (foundation)
+│   ├── events.py
+│   ├── logger.py
+│   ├── mesh.py
+│   ├── telemetry.py
+│   └── config.py
 │
-├── configs/
-│   ├── architecture_a.yaml   Centralized (single GS monitor, no mesh, no recovery)
-│   ├── architecture_b.yaml   Distributed (per-UAV monitors, no mesh, no recovery)
-│   ├── architecture_c.yaml   CSMA + self-healing (mesh + coordinator + recovery)
-│   └── experiment.yaml       Mission, telemetry endpoints, attacks list, run counts
+├── configs/                     (architecture + experiment configs)
+│   ├── architecture_a.yaml
+│   ├── architecture_b.yaml
+│   ├── architecture_c.yaml
+│   └── experiment.yaml
 │
-├── detectors/
-│   ├── base.py            Detector ABC
-│   ├── heartbeat.py       3s timeout + hysteresis
-│   ├── command.py         sysid whitelist {1, 2, 3, 255}
-│   ├── gps.py             EKF pos_horiz_ratio > 1.0 sustained 3 samples
-│   └── cross_check.py     Peer-position kinematic feasibility (separate contract)
+├── detectors/                   (pure detectors)
+│   ├── base.py
+│   ├── heartbeat.py
+│   ├── command.py
+│   ├── gps.py
+│   └── cross_check.py
 │
-├── decision/
-│   ├── isolation.py       IsolationDecider: severity threshold, dedup
-│   └── recovery.py        RecoveryDecider: REASON_TO_ACTION table, dedup
+├── decision/                    (pure deciders)
+│   ├── isolation.py
+│   └── recovery.py
 │
-├── enforcement/
-│   ├── isolation.py       IsolationEnforcer ABC, LocalIsolationEnforcer,
-│   │                      MeshAnnouncingIsolationEnforcer
-│   ├── recovery.py        RecoveryExecutor (async), ActionHandler ABC
+├── enforcement/                 (side effects)
+│   ├── isolation.py
+│   ├── recovery.py
 │   └── handlers/
-│       ├── __init__.py    Re-exports all three handlers
-│       ├── restart.py     RestartProcessHandler + ProcessRunner ABC + Default
-│       ├── loiter.py      ModeLoiterHandler + MavsdkRunner ABC + Default
-│       └── filter.py      FilterCommandsHandler (state only, PoC simplification)
+│       ├── __init__.py
+│       ├── restart.py           (subprocess + Popen tracking)
+│       ├── loiter.py            (MAVSDK action.hold())
+│       └── filter.py            (state-only; PoC simplification)
 │
-├── runners/
-│   ├── __init__.py        Empty
-│   ├── monitor.py         Single-UAV Monitor (8.1 + 8.2 + 8.3)
-│   ├── coordinator.py     Election + recovery orchestrator (8.4)
-│   ├── factory.py         Configs → WiredFleet (8.6a)
-│   ├── missions.py        MissionRunner ABC + NullMissionRunner (8.6b)
-│   └── experiment.py      ExperimentRunner + RunResult (8.6b)
+├── runners/                     (orchestrators)
+│   ├── __init__.py
+│   ├── monitor.py               (per-UAV obs + isolation + mesh)
+│   ├── coordinator.py           (election + recovery orchestration)
+│   ├── factory.py               (configs → WiredFleet)
+│   ├── missions.py              (MissionRunner ABC + NullMissionRunner)
+│   ├── mission_mavsdk.py        (MavsdkMissionRunner for step 10)
+│   └── experiment.py            (full lifecycle orchestrator)
 │
-├── attacks/
-│   ├── __init__.py        Re-exports ABC + Null
-│   └── base.py            AttackInjector ABC + NullAttackInjector + AttackContext
+├── attacks/                     (concrete attacks)
+│   ├── __init__.py
+│   ├── base.py                  (AttackInjector ABC + Null)
+│   ├── comm_disruption.py       (iptables DROP)
+│   ├── command_injection.py     (MAVLink spoofed sysid loop)
+│   └── gps_spoofing.py          (MAVSDK param manipulation)
+│
+├── metrics/                     (analysis)
+│   ├── __init__.py
+│   └── analyzer.py              (MTTD/MTTR/FP/FN/impact)
 │
 ├── scripts/
-│   └── smoke_telemetry.py Live PX4 SITL verification of TelemetryListener
+│   └── smoke_telemetry.py
 │
-└── tests/                 21 test files, 326 tests total
+└── tests/                       (24 test files, 422 tests)
 ```
 
 ---
 
-## 7. Test count timeline (sanity check on history)
+## 7. Test count timeline
 
 ```
-55 → 83 → 100 → 122 → 143 → 164 → 200 → 218 → 231 → 244
-→ 252 → 259 → 278 → 296 → 312 → 326 (current)
+55 → 83 → 100 → 122 → 143 → 164 → 200 → 218 → 231 → 244 → 252
+→ 259 → 278 → 296 → 312 → 326 → 343 → 359 → 379 → 400 → 422 (current)
 ```
 
 | Increment | What was added |
 |-----------|----------------|
-| 55 → 83 | Step 5 foundation (events, logger, mesh, telemetry, config) |
-| 83 → 164 | Step 6 detectors (heartbeat, command, gps, cross_check) |
+| 55 → 164  | Steps 5–6 (foundation, detectors) |
 | 164 → 231 | Step 7 (deciders + enforcers) |
-| 231 → 244 | 8.1 monitor observation |
-| 244 → 252 | 8.2 monitor + isolation |
-| 252 → 259 | 8.3 monitor + mesh + cross_check |
-| 259 → 278 | 8.4 coordinator |
-| 278 → 296 | 8.5 real action handlers |
-| 296 → 312 | 8.6a factory |
-| 312 → 326 | 8.6b experiment runner |
+| 231 → 296 | Step 8.1–8.5 (monitor + coordinator + handlers) |
+| 296 → 326 | Step 8.6a + 8.6b (factory + experiment runner) |
+| 326 → 379 | Step 9 (3 attacks) |
+| 379 → 400 | MavsdkMissionRunner |
+| 400 → 422 | Analyzer |
 
-If pytest count drops after a change, something broke. Quick sanity:
-`python -m pytest tests/ -q | tail -3`.
+Quick sanity check: `python -m pytest tests/ -q | tail -3` →
+should report `422 passed`.
 
 ---
 
@@ -382,75 +313,72 @@ If pytest count drops after a change, something broke. Quick sanity:
 ### Why `cross_check` doesn't inherit `Detector`
 Detectors take `TelemetryEvent`s (own UAV's telemetry). CrossCheck
 takes `PeerPositionAnnounce`s (other UAVs' positions from mesh). Two
-different contracts → two different interfaces. Forcing inheritance
-would have created a confusing `feed()` semantics. Cross_check is
-wired separately on `Monitor` via `cross_check=` constructor param.
+different contracts → two different interfaces. Cross_check is wired
+separately on `Monitor` via `cross_check=` constructor param.
 
 ### Why mesh lifecycle is caller-owned
 Mesh can be shared between Monitor (publishes peer_position) and
-Coordinator (subscribes to isolation, recovery_req, recovery_ack)
-in the same process. If Monitor owned mesh.start/stop, the coord
-would not see early subscriptions. By making the caller (factory or
-experiment_runner) own the lifecycle, one mesh instance can serve
-multiple subscribers correctly.
+Coordinator (subscribes to isolation, recovery_req, recovery_ack) in
+the same process. If Monitor owned mesh.start/stop, the coord would
+not see early subscriptions. Tests must `mesh.start()` before
+`monitor.start()` and `mesh.stop()` after `monitor.stop()`.
 
 ### Why `asyncio.run()` per recovery in coordinator
-Tradeoff. Pros: simple, no long-lived loop to manage, no thread
-ownership issues. Cons: ~1s overhead per call (loop creation + MAVSDK
-connect), no shared MAVSDK connection across recoveries.
+Tradeoff. Pros: simple, no long-lived loop to manage. Cons: ~1 s
+overhead per call (loop creation + MAVSDK connect).
 
-For the PoC this is acceptable and explicit in Chapter 4. If a single
-run needs many recoveries on the same UAV (unlikely given the attack
-model), refactor to `asyncio.run_coroutine_threadsafe` against a
-long-lived loop in a dedicated thread. Module docstring documents
-both paths.
-
-### Why ProcessSpec hardcoded in factory
-The Architecture C factory needs to know how to relaunch each PX4
-instance. Hardcoding (`~/PX4-Autopilot/build/px4_sitl_default/bin/px4
--i <instance>` with `PX4_SYS_AUTOSTART=4001`, `PX4_GZ_MODEL=x500`,
-spaced poses) matches the user's specific setup.
-
-If running elsewhere: pass `px4_path=` parameter, or override the
-factory's `_default_process_spec` function. Tests don't exercise this
-(they use FakeProcessRunner).
+For PoC this is acceptable and explicit in Chapter 4. If real
+deployment needs many recoveries with persistent MAVSDK, refactor
+to `asyncio.run_coroutine_threadsafe` against a long-lived loop in
+a dedicated thread. Module docstring documents both paths.
 
 ### Why three sysids `{1, 2, 3, 255}`
-Per PX4 convention: 1, 2, 3 are the UAV autopilot sysids
-(instance+1); 255 is the GCS (QGroundControl, MAVSDK in some
-configurations). Anything else is an attacker.
+PX4 convention: 1, 2, 3 are the UAV autopilot sysids (instance+1);
+255 is the GCS (QGroundControl, MAVSDK). Anything else is an attacker.
 
-### Why severity threshold is "high" in IsolationDecider
-A `medium` severity means "anomalous but not necessarily an attack".
-Isolating on medium would trigger false positives during normal SITL
-startup transients. Threshold of `high` means we isolate only when
-the detector is confident enough. This is configurable per-decider
-in case future detectors emit different severities.
+### Why attacker_sysid defaults to 99
+Outside the whitelist (so detector flags it) but innocuous-looking
+(not a magic value). Could be any 4-254 except {1, 2, 3, 255}.
+
+### Why MissionItem uses absolute GPS, not NED
+PX4 mission API expects lat/lon waypoints. NED is the input format
+(from config) but gets converted using each drone's own home position
+at mission start. This means same NED waypoints produce a coordinated
+formation flight relative to spawn positions.
+
+### Why analyzer metrics never raise
+Real experiment data is messy: missing files, runs killed mid-flight,
+corrupt JSON. The analyzer's contract is "return what you found,
+report what you couldn't" — populate `error` field instead of raising.
+Aggregation then skips errored runs. The dissertation can report
+dropout rate as a quality indicator.
 
 ---
 
 ## 9. PoC simplifications (for Chapter 4)
 
 These are intentional gaps between PoC and a production deployment.
-**Document each in Chapter 4** with reasoning. Reviewer-proofing.
+**Document each in Chapter 4** with reasoning.
 
-| Simplification | Real deployment would be | Impact |
-|----------------|--------------------------|--------|
-| ZeroMQ TCP loopback | FANET radio mesh | Same PUB/SUB semantics, different physical channel + latency profile |
-| `subprocess.Popen` kill+restart | Hot-failover / mission resume | MTTR dominated by PX4 cold start (~5–8s). **Decompose MTTR in Ch. 5**: detection / isolation / action / stable phases |
-| `FilterCommandsHandler` state-only | iptables / mavlink-router | Real adds ~10–50 ms apply latency. Document in MTTR breakdown |
-| MAVSDK connection-per-call | Persistent gRPC connection | ~1 s overhead per loiter recovery. Acceptable for PoC |
-| Single-VM deployment via IPC | Distributed companion computers | Network latency between detection and isolation is loopback, not WiFi |
-| Wall-clock timestamps | NTP/PTP-synced clocks | Single VM = coherent clocks "for free". In real deployment add ±10–100 ms clock skew |
+| Simplification | Real deployment | Impact |
+|----------------|-----------------|--------|
+| ZeroMQ TCP loopback | FANET radio mesh | Same PUB/SUB semantics, different physical channel + latency |
+| `subprocess.Popen` kill+restart | Hot-failover / mission resume | MTTR dominated by PX4 cold start (~5–8s) |
+| `FilterCommandsHandler` state-only | iptables / mavlink-router | Real adds ~10–50 ms apply latency |
+| MAVSDK connection-per-call | Persistent gRPC connection | ~1 s overhead per loiter recovery |
+| Single-VM deployment via IPC | Distributed companion computers | Network latency = loopback, not WiFi |
+| Wall-clock timestamps | NTP/PTP-synced clocks | Single VM = coherent clocks "for free" |
 | GPS spoofing via SIM_GPS_NOISE | Real RF GPS spoofer | Approximation of effect, not method |
-| MTTD floor = 3 s for GPS | (Physical lower bound is whatever EKF takes) | PX4 streams `ESTIMATOR_STATUS` at 1 Hz; detector needs 3 samples. **This is a tool limit, not the architecture's fundamental limit.** |
-| `asyncio.run()` per recovery | Long-lived event loop in coordinator | OK for sync handlers (subprocess/iptables); may bite with persistent MAVSDK in some configs |
-| 3 UAVs | 5–7 UAVs per dissertation generalized model | Document the gap. The PoC uses 3 for resource reasons; the architecture scales — Ch. 4 explains |
+| MTTD floor = 3 s for GPS | Whatever EKF takes | PX4 streams `ESTIMATOR_STATUS` at 1 Hz; detector needs 3 samples |
+| `asyncio.run()` per recovery | Long-lived event loop | OK for sync handlers; may need refactor for persistent MAVSDK |
+| 3 UAVs | 5–7 UAVs (generalized model) | PoC uses 3 for resource reasons; architecture scales |
+| iptables DROP rule (binary) | RF jamming (probabilistic) | Reproducible signal, less realistic |
+| Spoofed sysid attack | Could also forge legitimate sysid | Detection of stolen sysid requires signed MAVLink2 — out of scope |
+| Pymavlink sync API in asyncio.to_thread | Async-native MAVLink lib | Acceptable overhead; documented |
 
-The dissertation's framing: **the architectural model is the
-contribution**, the PoC validates that the model can be implemented
-and that the metrics are meaningful. Limitations of the PoC are not
-limitations of the architecture.
+**Framing**: the architectural model is the contribution, the PoC
+validates that the model can be implemented and that the metrics are
+meaningful. Limitations of the PoC are not limitations of the architecture.
 
 ---
 
@@ -459,8 +387,8 @@ limitations of the architecture.
 ### Host system
 - **Hardware**: Apple M4 Pro Mac
 - **VM**: UTM running Ubuntu 22.04 ARM64
-- **VM disk**: 30 GB (clean up PX4 logs regularly: `rm -rf
-  ~/PX4-Autopilot/build/px4_sitl_default/rootfs/*/log/`)
+- **VM disk**: 30 GB. Clean PX4 logs regularly:
+  `rm -rf ~/PX4-Autopilot/build/px4_sitl_default/rootfs/*/log/`
 - **Python**: 3.10.12, venv at `~/csma_poc_v2/.venv`
 
 ### PX4 SITL
@@ -493,6 +421,19 @@ limitations of the architecture.
 | uav_1 | `tcp://127.0.0.1:5551` |
 | uav_2 | `tcp://127.0.0.1:5552` |
 
+### iptables / sudo (Step 10 requirement)
+Comm_disruption attack requires either passwordless sudo or
+CAP_NET_ADMIN on the python interpreter:
+
+```bash
+# Option A: passwordless sudo for iptables
+sudo visudo
+# Add line: youruser ALL=(ALL) NOPASSWD: /usr/sbin/iptables
+
+# Option B: grant CAP_NET_ADMIN (preferable, no sudo)
+sudo setcap cap_net_admin+ep $(realpath $(which python3))
+```
+
 ---
 
 ## 11. Common mistakes to avoid
@@ -505,13 +446,11 @@ an `if`.
 ### Don't forget mesh.start() in tests with real ZmqMesh
 Monitor doesn't own mesh lifecycle. If you write an integration test
 with `ZmqMesh` and forget to call `mesh_a.start()` before
-`monitor_a.start()`, the test will hang on receive. Already burned
-once in 8.3 testing.
+`monitor_a.start()`, the test will hang on receive.
 
 ### Don't use `subprocess.Popen` without tracking handles
 `DefaultProcessRunner` tracks handles per uav_id. Never use
-`pkill -f "px4.*-i 1"` — pattern matching can hit unrelated
-processes. Already documented in `handlers/restart.py`.
+`pkill -f "px4.*-i 1"` — pattern matching can hit unrelated processes.
 
 ### Be careful with SecurityEvent fields
 - `severity` is in `{low, medium, high}` (not "critical")
@@ -519,13 +458,29 @@ processes. Already documented in `handlers/restart.py`.
 - `evidence` is the dict for raw values
 
 ### AttackEvent uses `attack_type`, not `attack_name`
-Got bitten by this in 8.6b testing. The injector's `name` property
-maps to `attack_type=` keyword in AttackEvent. Don't conflate.
+Got bitten once. The injector's `name` property maps to `attack_type=`
+keyword in AttackEvent. Don't conflate.
 
-### Phases are `inject_start` / `inject_active` / `inject_end`
-Not `armed` / `fired` / `ended`. Defined as comment in
-`core/events.py::AttackEvent`. The runner emits `inject_start` after
-fire() and `inject_end` after the observation window.
+### Attack phases are `inject_start` / `inject_end`
+The runner emits `inject_start` after fire() and `inject_end` after
+the observation window. The events.py comment mentions `inject_active`
+as a possibility, but the runner uses only the two end markers.
+Analyzer keys MTTD off `inject_start`.
+
+### `attacker_sysid` MUST be outside `{1, 2, 3, 255}`
+Otherwise `CommandInjectionDetector` won't flag it as spoofed and the
+attack produces a null result. Defaults to 99. Constructor enforces.
+
+### MAVSDK connection-per-call is intentional
+`DefaultMavsdkRunner`, `DefaultGpsSpoofingRunner`,
+`MavsdkDroneController` all create short-lived `System()` instances.
+Don't try to "optimize" by sharing — the asyncio loop lifetime in
+`asyncio.run()` per recovery makes that complicated.
+
+### `sudo -n` for iptables in CI
+`SubprocessIptablesRunner` uses `sudo -n` (non-interactive). If sudo
+asks for password, the command fails. Either configure passwordless
+sudo or use CAP_NET_ADMIN.
 
 ### PX4 cold start is slow
 `ProcessSpec.start_timeout_sec=8.0` may need bumping on slower
@@ -533,9 +488,9 @@ hardware. If MTTR measurements look weird, check whether PX4 actually
 came back up within the timeout.
 
 ### Disk fills fast
-PX4 SITL writes ulog files to
-`rootfs/<instance>/log/`. Each run can be 100–200 MB. Run
-counts × 3 instances × 200 MB = problem. Clean before each batch.
+PX4 SITL writes ulog files to `rootfs/<instance>/log/`. Each run can
+be 100–200 MB. Run counts × 3 instances × 200 MB = problem.
+Clean before each batch.
 
 ### Don't bypass `present_files`
 The user can't see files in `/home/claude/csma_poc_v2/` directly.
@@ -546,25 +501,46 @@ After every step:
 
 ---
 
-## 12. How to continue (handoff to step 9)
+## 12. How to continue (handoff to step 10)
 
 Assuming a new chat starts with this repo cloned and this file read:
 
-1. **Acknowledge the state.** "326 passing tests, structure complete,
-   ready for step 9 (attack injection)."
-2. **Pick the easiest attack first.** comm_disruption is just iptables
-   + a delete on cleanup. Write `attacks/comm_disruption.py` with the
-   `AttackInjector` contract. Test with a `FakeIptablesRunner` DI
-   seam so unit tests don't need sudo.
-3. **Step-by-step, as before.** One attack class per turn, test it,
-   ship it. After all three are done, step 10 = first real integration
-   run.
-4. **The hard part of step 10 will be MavsdkMissionRunner.** Need to
-   connect to 3 PX4 instances concurrently, upload waypoints, takeoff,
-   loiter at altitude, mission resume after recovery. Plan ahead.
-5. **Resource overhead measurement (step 12).** Not yet wired. Add
-   `psutil` sampling thread to ExperimentRunner that records CPU%/RAM
-   per process every 1s to a `resources.jsonl` log.
+1. **Acknowledge the state.** "422 passing tests, all non-PX4 code
+   complete, ready for step 10 — first live integration run."
+
+2. **Set up sudo / CAP_NET_ADMIN.** Before any iptables-based attack
+   can fire, either:
+   - Add `youruser ALL=(ALL) NOPASSWD: /usr/sbin/iptables` to sudoers, OR
+   - `sudo setcap cap_net_admin+ep $(realpath $(which python3))` on
+     the venv interpreter
+
+3. **Write a step-10 integration script.** Something like
+   `scripts/run_one.py` that:
+   - Takes architecture and attack name as CLI args
+   - Calls `build_fleet` + `ExperimentRunner.run()`
+   - Reports the run directory at exit
+
+4. **First combo to try**: Architecture C + comm_disruption.
+   Simplest because iptables is binary (heartbeat dies = detected).
+   Watch for:
+   - **Port conflict** on 14540: telemetry listener binds (udpin)
+     and MAVSDK connects (udp://) on same port. May need to use
+     different MAVSDK port (PX4 SITL default has both 14540 and 14580
+     available; check `mavlink start` config in PX4 startup script).
+   - **Mesh peer connection timing**: ZmqMesh slow-joiner workaround
+     gives 0.3s window. May need bigger window if startup is slow.
+   - **Home position GPS lock**: `MavsdkDroneController.get_home_position`
+     waits for `telemetry.home()` — may hang if GPS isn't ready
+     within timeout. Add deadline.
+
+5. **Once one combo works**, scale to the 3×3 matrix (step 11), then
+   to the full experiment (step 12). Analyzer is ready — point it at
+   the results directory and it'll produce the Chapter 5 numbers.
+
+6. **Not yet wired**:
+   - Resource overhead (CPU%/RAM) sampling via psutil
+   - `metrics/plots.py` for matplotlib graphs (only JSON summary right
+     now)
 
 If anything in this document feels incomplete or contradicts what you
 see in code, the **code is authoritative**. This file is a navigation
@@ -578,7 +554,7 @@ aid, not a spec.
 - Output staging: `/mnt/user-data/outputs/csma_poc_v2/`
 - Repo (user's): `~/csma_poc_v2/`
 - Run tests: `python -m pytest tests/ -q | tail -3`
-- Expected count after 8.6b: **326 passed**
+- Expected count: **422 passed**
 - Smoke test: `python scripts/smoke_telemetry.py` (needs live PX4)
 
 End of handoff document.
