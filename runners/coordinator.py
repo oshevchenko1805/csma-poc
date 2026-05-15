@@ -138,6 +138,10 @@ class Coordinator:
         # Liveness map: peer sysid -> last-seen wall-clock seconds.
         # Self is implicitly alive — never written here.
         self._last_seen: dict[int, float] = {}
+        # Peers whose UAV has been announced as isolated. Excluded
+        # from election even if their mesh peer_position is still
+        # arriving. Removed by a successful RecoveryAck.
+        self._isolated_sysids: set[int] = set()
         self._liveness_lock = threading.Lock()
 
         # Subscribe at construction. Callbacks fire after mesh.start()
