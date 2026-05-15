@@ -59,6 +59,7 @@ from core.config import (  # noqa: E402
     load_architecture_config,
     load_experiment_config,
 )
+from enforcement.handlers import ExternalAwareProcessRunner  # noqa: E402
 from runners.experiment import ExperimentRunner  # noqa: E402
 from runners.mission_mavsdk import MavsdkMissionRunner  # noqa: E402
 from runners.missions import MissionRunner, NullMissionRunner  # noqa: E402
@@ -146,6 +147,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--px4-pid-file",
+        default="/tmp/px4_pids",
+        help=(
+            "path to file containing externally-launched PX4 PIDs "
+            "(one per line, in sysid order: inst 0, inst 1, inst 2). "
+            "Default: /tmp/px4_pids (written by scripts/launch_px4.sh). "
+            "When this file exists, an ExternalAwareProcessRunner is "
+            "built so RestartProcessHandler can actually kill the right "
+            "PX4 on recovery. Pass '' to disable."
+        ),
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="build everything but don't actually run() — useful for smoke-testing wiring",
@@ -216,6 +229,59 @@ def build_mavsdk_mission(
     )
 
 
+def build_process_runner(
+    pid_file: str,
+    exp_cfg: ExperimentConfig,
+) -> ExternalAwareProcessRunner | None:
+    """Build an ExternalAwareProcessRunner from a PID file if present.
+
+    PID file format: one PID per line, in sysid order (line 1 = sysid 1,
+    line 2 = sysid 2, ...). Matches what scripts/launch_px4.sh writes.
+
+    Returns None when:
+      - pid_file is empty string (explicitly disabled)
+      - file does not exist
+      - file is empty
+      - line count doesn't match number of telemetry endpoints
+      - any line is not a valid integer
+
+    A None return means RestartProcessHandler will fall back to its
+    DefaultProcessRunner — fine for tests, useless for live PoC (it
+    won't be able to kill externally-launched PX4 processes).
+    """
+    if not pid_file:
+        return None
+    path = Path(pid_file)
+    if not path.exists():
+        return None
+
+    try:
+        lines = [ln.strip() for ln in path.read_text().splitlines() if ln.strip()]
+    except OSError:
+        return None
+    if not lines:
+        return None
+
+    # Order endpoints by sysid; line i maps to that sysid's uav_id.
+    ordered = sorted(exp_cfg.telemetry.endpoints, key=lambda e: e.sysid)
+    if len(lines) != len(ordered):
+        _log(
+            f"warn: {pid_file} has {len(lines)} PIDs but "
+            f"{len(ordered)} telemetry endpoints — ignoring PID file"
+        )
+        return None
+
+    mapping: dict[str, int] = {}
+    try:
+        for ep, raw in zip(ordered, lines):
+            mapping[ep.uav_id] = int(raw)
+    except ValueError:
+        _log(f"warn: {pid_file} contains non-integer PID — ignoring PID file")
+        return None
+
+    return ExternalAwareProcessRunner(uav_to_initial_pid=mapping)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -265,6 +331,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.observation_after_attack_sec is not None:
         extra["observation_after_attack_sec"] = args.observation_after_attack_sec
 
+    process_runner = build_process_runner(args.px4_pid_file, exp_cfg)
+
     runner = ExperimentRunner(
         arch_cfg=arch_cfg,
         exp_cfg=exp_cfg,
@@ -273,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
         attack_injector=attack,
         mission_runner=mission,
         target_uav=args.target_uav,
+        process_runner=process_runner,
         **extra,
     )
 
@@ -286,6 +355,13 @@ def main(argv: list[str] | None = None) -> int:
         _log(f"mavsdk endpoints: {mission._endpoints}")
     else:
         _log("mission runner: NullMissionRunner (no flight)")
+    if process_runner is not None:
+        _log(
+            f"process runner: ExternalAwareProcessRunner with PIDs "
+            f"{process_runner.pending_initial_pids}"
+        )
+    else:
+        _log("process runner: default (no external PID tracking)")
 
     if args.dry_run:
         _log("--dry-run: skipping ExperimentRunner.run()")
