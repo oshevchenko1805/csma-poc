@@ -220,7 +220,73 @@ class TestElection:
         mesh.deliver("peer_position", _peer_pos("uav_0"))
         assert {1, 2}.issubset(c.alive_sysids)
 
+# ---------------------------------------------------------------------------
+# Isolation-aware election (added with isolation-set tracking fix)
+# ---------------------------------------------------------------------------
 
+
+class TestIsolationAwareElection:
+    """An isolated peer is excluded from the alive set used for
+    coordinator election. This includes self — an isolated UAV
+    relinquishes the coordinator role to the next-lowest non-isolated
+    peer."""
+
+    def test_isolated_peer_drops_from_alive_set(self):
+        c2, mesh2, *_ = _build_coord(our_sysid=2)
+        # sysid 1 alive in mesh -> c2 NOT coordinator (1 < 2)
+        mesh2.deliver("peer_position", _peer_pos("uav_0"))
+        assert c2.is_coordinator is False
+        # Announce isolation for uav_0
+        mesh2.deliver("isolation", _isolation(target_uav="uav_0"))
+        assert 1 in c2.isolated_sysids
+        # Now c2 is the lowest non-isolated alive peer.
+        assert c2.is_coordinator is True
+        assert 1 not in c2.alive_sysids
+
+    def test_self_isolation_loses_coordinator_status(self):
+        c1, mesh1, *_ = _build_coord(our_sysid=1)
+        assert c1.is_coordinator is True
+        # Our own UAV isolated -> we surrender the coordinator role.
+        mesh1.deliver("isolation", _isolation(target_uav="uav_0"))
+        assert 1 in c1.isolated_sysids
+        assert c1.is_coordinator is False
+
+    def test_successful_recovery_ack_lifts_isolation(self):
+        c2, mesh2, *_ = _build_coord(our_sysid=2)
+        mesh2.deliver("peer_position", _peer_pos("uav_0"))
+        mesh2.deliver("isolation", _isolation(target_uav="uav_0"))
+        assert 1 in c2.isolated_sysids
+        ack = RecoveryAck(
+            source="x", target_uav="uav_0",
+            action=RecoveryAction.RESTART_PROCESS,
+            success=True, executor="x",
+        )
+        mesh2.deliver("recovery_ack", ack)
+        assert 1 not in c2.isolated_sysids
+
+    def test_failed_recovery_ack_keeps_isolation(self):
+        c2, mesh2, *_ = _build_coord(our_sysid=2)
+        mesh2.deliver("peer_position", _peer_pos("uav_0"))
+        mesh2.deliver("isolation", _isolation(target_uav="uav_0"))
+        assert 1 in c2.isolated_sysids
+        ack = RecoveryAck(
+            source="x", target_uav="uav_0",
+            action=RecoveryAction.RESTART_PROCESS,
+            success=False, executor="x", error="oops",
+        )
+        mesh2.deliver("recovery_ack", ack)
+        assert 1 in c2.isolated_sysids
+
+    def test_duplicate_isolation_announces_idempotent(self):
+        c2, mesh2, *_ = _build_coord(our_sysid=2)
+        mesh2.deliver("isolation", _isolation(target_uav="uav_0"))
+        mesh2.deliver("isolation", _isolation(target_uav="uav_0"))
+        assert c2.isolated_sysids == frozenset({1})
+
+    def test_isolated_sysids_empty_initially(self):
+        c2, *_ = _build_coord(our_sysid=2)
+        assert c2.isolated_sysids == frozenset()
+        
 # ---------------------------------------------------------------------------
 # Isolation -> RecoveryRequest issuance
 # ---------------------------------------------------------------------------
