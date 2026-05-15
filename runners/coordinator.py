@@ -174,26 +174,40 @@ class Coordinator:
 
     @property
     def is_coordinator(self) -> bool:
-        """True iff our sysid is the smallest among currently-alive peers."""
+        """True iff our sysid is the smallest among currently-alive
+        non-isolated peers.
+
+        An isolated peer (a UAV whose IsolationAnnounce has been
+        received but no successful RecoveryAck yet) is excluded from
+        the election. This includes self: if our own UAV is isolated
+        we relinquish the coordinator role to the next-lowest
+        non-isolated peer. This closes the trivial recursion where a
+        UAV under attack could attempt to coordinate its own recovery.
+        """
         with self._liveness_lock:
+            # Fast path: if we are isolated, we cannot coordinate.
+            if self._our_sysid in self._isolated_sysids:
+                return False
             now = time.time()
             alive_peers = {
                 sysid
                 for sysid, ts in self._last_seen.items()
                 if (now - ts) <= self._liveness_timeout
             }
-        # Self is always alive.
-        alive = alive_peers | {self._our_sysid}
-        # Limit to configured fleet.
+            isolated = set(self._isolated_sysids)
+        # Self is always alive in the mesh sense; isolated set already
+        # subtracted above for the fast-path on self.
+        alive = (alive_peers | {self._our_sysid}) - isolated
         candidates = [s for s in self._all_sysids if s in alive]
         if not candidates:
-            # Defensive — should never trigger because self is always in.
-            return self._our_sysid == min(self._all_sysids)
+            # Every configured sysid is dead or isolated. Fleet is
+            # fully disabled — no eligible coordinator.
+            return False
         return self._our_sysid == min(candidates)
 
     @property
     def alive_sysids(self) -> frozenset[int]:
-        """Snapshot of sysids the coordinator considers alive (incl. self)."""
+        """Snapshot of sysids considered alive AND non-isolated."""
         with self._liveness_lock:
             now = time.time()
             alive = {
@@ -201,7 +215,14 @@ class Coordinator:
                 for sysid, ts in self._last_seen.items()
                 if (now - ts) <= self._liveness_timeout
             }
-        return frozenset(alive | {self._our_sysid})
+            isolated = set(self._isolated_sysids)
+        return frozenset((alive | {self._our_sysid}) - isolated)
+
+    @property
+    def isolated_sysids(self) -> frozenset[int]:
+        """Snapshot of sysids currently marked as isolated."""
+        with self._liveness_lock:
+            return frozenset(self._isolated_sysids)
 
     # ----- diagnostics -----
 
@@ -234,6 +255,15 @@ class Coordinator:
         if not isinstance(ann, IsolationAnnounce):
             return
         self._n_isolations_seen += 1
+        # Mark target as isolated BEFORE checking is_coordinator:
+        # marking self-as-target may flip the election outcome (we lose
+        # coordinator status to the next-lowest non-isolated peer).
+        # This is the mechanism by which the coordinator role transfers
+        # when the currently-elected coordinator's own UAV gets isolated.
+        target_sysid = self._uav_to_sysid.get(ann.target_uav)
+        if target_sysid is not None:
+            with self._liveness_lock:
+                self._isolated_sysids.add(target_sysid)
         if not self.is_coordinator:
             self._n_skipped_not_coordinator += 1
             return
@@ -282,6 +312,14 @@ class Coordinator:
         if not isinstance(ack, RecoveryAck):
             return
         self._n_recovery_acks_received += 1
+        # Successful recovery lifts the isolation flag, restoring the
+        # peer's election eligibility. Failed recovery keeps the peer
+        # isolated — a subsequent retry is needed to lift it.
+        if ack.success:
+            target_sysid = self._uav_to_sysid.get(ack.target_uav)
+            if target_sysid is not None:
+                with self._liveness_lock:
+                    self._isolated_sysids.discard(target_sysid)
         try:
             self._decider.mark_recovered(ack.target_uav)
         except Exception:
