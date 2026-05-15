@@ -63,6 +63,21 @@ Election semantics edge cases
   read. This is deliberately simple: the dissertation can extend it
   with a quorum-style mechanism without changing this module's
   external surface.
+- Isolation-aware election: a peer announced as isolated (via
+  IsolationAnnounce on the mesh) is removed from the election's
+  alive set until a successful RecoveryAck arrives. This includes
+  self: when our own UAV is isolated, we relinquish the coordinator
+  role. This closes the trivial recursion where a UAV under attack
+  could attempt to coordinate its own recovery.
+
+Recovery event logging
+----------------------
+If `log_path` is provided the Coordinator owns an EventLogger that
+writes one JSONL line per RecoveryRequest/RecoveryAck it publishes
+(not per copy it receives — that would duplicate events on every
+peer). This makes the full SecurityEvent -> IsolationAnnounce ->
+RecoveryRequest -> RecoveryAck chain reconstructible from the merged
+log for analyzer MTTR computation.
 """
 
 from __future__ import annotations
@@ -79,8 +94,8 @@ from core.events import (
     RecoveryAck,
     RecoveryRequest,
 )
-from core.mesh import MeshBus
 from core.logger import EventLogger
+from core.mesh import MeshBus
 from decision.recovery import RecoveryDecider
 from enforcement.recovery import RecoveryExecutor
 
@@ -107,6 +122,7 @@ class Coordinator:
         recovery_executor: RecoveryExecutor,
         liveness_timeout_sec: float = DEFAULT_LIVENESS_TIMEOUT_SEC,
         on_recovery_completed: Optional[RecoveryCompletedCallback] = None,
+        log_path: Optional[Path] = None,
     ) -> None:
         if our_sysid not in all_sysids:
             raise ValueError(
@@ -164,6 +180,7 @@ class Coordinator:
         self._n_skipped_not_target: int = 0
 
         self._started: bool = False
+
         # Optional JSONL logger for recovery events (RecoveryRequest,
         # RecoveryAck published by this coordinator). Reconstructs the
         # SecurityEvent -> IsolationAnnounce -> RecoveryRequest ->
@@ -264,7 +281,7 @@ class Coordinator:
             self._logger.log(event)
         except Exception:
             self._n_handler_errors += 1
-          
+
     # ----- mesh callbacks -----
 
     def _on_peer_position(self, ann) -> None:
