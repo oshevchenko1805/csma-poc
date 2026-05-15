@@ -12,8 +12,22 @@ together contain everything needed to continue.
 swarm cybersecurity PoC evaluating a self-healing Cybersecurity Mesh
 Architecture (CSMA) against two baselines.
 
-**Status**: **All non-PX4 code complete.** 422 tests passing. What
-remains is **only live PX4 integration runs** — step 10 forward.
+**Status**: **Step 10a complete with first real metrics from live
+PX4 SITL.** 438 tests passing. The full security pipeline runs
+end-to-end against real PX4 instances: detect → isolate → real
+process restart → recovery acknowledgment → un_isolate. Gaps 1 and 2
+that surfaced during step 10a are now closed. What remains is step
+10b (add MAVSDK mission for active flight) and onwards to the 3×3
+matrix and full experiment.
+
+**First real metrics** (Architecture C, comm_disruption, null
+mission, single trial against live PX4):
+- **MTTD = 2.88 s** — heartbeat timeout (3 s) + dispersion
+- **MTTR = 8.07 s** — dominated by `ProcessSpec.start_timeout_sec=8.0`
+  (PX4 cold start)
+- **detected: true, recovery_success: true** — confirmed by PID inst 0
+  changing before vs after the run (real process restart, not just
+  ack contract)
 
 **User**: V, PhD researcher, writing in Ukrainian. The dissertation is
 a monograph. Chapters 2–3 are complete and reviewed. This repo is the
@@ -45,6 +59,12 @@ These are the user's stated preferences. Follow them.
   needed, document it explicitly for Chapter 4. No silent hacks.
 - **Don't overuse formatting.** Bullets/headers when they add clarity,
   prose otherwise.
+- **Important: when multi-point diffs are involved, prefer giving the
+  user a full replacement file via `present_files` rather than a
+  list of N edits.** Past experience: GitHub UI / manual edits lose
+  one of the steps every time (e.g. the `_isolated_sysids` field, the
+  `log_path` parameter). One atomic file replace is reliable; a
+  6-step diff is not.
 
 ---
 
@@ -61,14 +81,14 @@ code (`detectors/`, `decision/`, `runners/monitor.py`,
   detectors and which enforcer type to use
 - **Dependency injection** at component boundaries
   (`NoOpMesh` vs `ZmqMesh`, `LocalIsolationEnforcer` vs
-  `MeshAnnouncingIsolationEnforcer`)
+  `MeshAnnouncingIsolationEnforcer`, `DefaultProcessRunner` vs
+  `ExternalAwareProcessRunner`)
 - **The factory** (`runners/factory.py`) that reads configs and
   picks the right components
 
 If you ever feel like writing `if arch == ...` in domain code: stop.
 The right answer is either a config switch, a different DI choice,
-or a new class. Violating this turns the dissertation's "single
-architecture, three deployments" claim into a lie.
+or a new class.
 
 ### Component layering
 
@@ -92,131 +112,205 @@ architecture, three deployments" claim into a lie.
 └──────────────────────────────────────────────────┘
 ```
 
-Threading and logging are the **monitor's responsibility**, not the
-detector's. This is why every Detector can be tested with simple
-synchronous calls.
-
 ### DI seams (where fakes plug in for tests)
 
-| Seam | Default | Used in tests |
-|------|---------|---------------|
-| `connection_factory` (factory.py) | real pymavlink | `FakeConnection` |
-| `mesh_factory` (factory.py) | ZmqMesh / NoOpMesh | `RecordingMesh` |
-| `ProcessRunner` (restart.py) | `subprocess.Popen` | `FakeProcessRunner` |
-| `MavsdkRunner` (loiter.py) | real MAVSDK (lazy import) | `FakeMavsdkRunner` |
-| `IptablesRunner` (comm_disruption) | `subprocess` with sudo | `FakeIptablesRunner` |
-| `MavlinkSender` (command_injection) | `PymavlinkSender` (lazy) | `FakeMavlinkSender` |
-| `GpsSpoofingRunner` (gps_spoofing) | MAVSDK Param API (lazy) | `FakeGpsSpoofingRunner` |
-| `DroneController` (mission_mavsdk) | `MavsdkDroneController` (lazy) | `FakeDroneController` |
-| `MissionRunner` (missions.py) | `MavsdkMissionRunner` | `NullMissionRunner` |
+| Seam | Default | Custom for live PoC |
+|------|---------|---------------------|
+| `connection_factory` (factory.py) | real pymavlink | `FakeConnection` in tests |
+| `mesh_factory` (factory.py) | ZmqMesh / NoOpMesh | `RecordingMesh` in tests |
+| `process_runner` (factory.py / experiment.py) | `DefaultProcessRunner` per handler | **`ExternalAwareProcessRunner` for live PoC** (shared across handlers) |
+| `ProcessRunner` (restart.py) | `DefaultProcessRunner` | `FakeProcessRunner` in tests |
+| `MavsdkRunner` (loiter.py) | real MAVSDK (lazy) | `FakeMavsdkRunner` in tests |
+| `IptablesRunner` (comm_disruption) | `subprocess` with sudo | `FakeIptablesRunner` in tests |
+| `MavlinkSender` (command_injection) | `PymavlinkSender` (lazy) | `FakeMavlinkSender` in tests |
+| `GpsSpoofingRunner` (gps_spoofing) | MAVSDK Param API (lazy) | `FakeGpsSpoofingRunner` in tests |
+| `DroneController` (mission_mavsdk) | `MavsdkDroneController` (lazy) | `FakeDroneController` in tests |
+| `MissionRunner` (missions.py) | `MavsdkMissionRunner` | `NullMissionRunner` for step 10a |
 | `AttackInjector` (attacks/base.py) | concrete attacks | `NullAttackInjector`, `RecordingInjector` |
 
 ---
 
 ## 4. What's done (completed steps)
 
-### Step 5: Foundation
-- `core/events.py` — `BaseEvent` + 8 typed event dataclasses with
-  registry: `TelemetryEvent`, `SecurityEvent`, `IsolationAnnounce`,
-  `RecoveryRequest`, `RecoveryAck`, `AttackEvent`, `MissionEvent`,
-  `PeerPositionAnnounce`
-- `core/logger.py` — JSONL `EventLogger` (thread-safe), `read_jsonl`,
-  `merge_jsonl` for post-hoc analysis
-- `core/mesh.py` — `MeshBus` ABC + `NoOpMesh` + `ZmqMesh`
-- `core/telemetry.py` — `TelemetryListener`
-- `core/config.py` — typed config loader
-- 4 YAML configs: `configs/{architecture_a,b,c,experiment}.yaml`
-- `scripts/smoke_telemetry.py` — live PX4 SITL verification
+### Step 5: Foundation (events, logger, mesh, telemetry, config)
+[unchanged from previous PROJECT_STATE]
 
-### Step 6: Detectors
-- `detectors/base.py` — `Detector` ABC
-- `detectors/heartbeat.py` — 3s timeout + hysteresis
-- `detectors/command.py` — sysid whitelist `{1, 2, 3, 255}`
-- `detectors/gps.py` — EKF `pos_horiz_ratio > 1.0` sustained 3 samples
-- `detectors/cross_check.py` — peer-position kinematic feasibility
-  (does NOT inherit `Detector`; separate contract `feed_peer_position`)
+### Step 6: Detectors (heartbeat, command, gps, cross_check)
+[unchanged]
 
 ### Step 7: Decision + enforcement
-- `decision/isolation.py` — severity threshold, dedup
-- `decision/recovery.py` — `REASON_TO_ACTION` table
-- `enforcement/isolation.py` — `LocalIsolationEnforcer` (A/B),
-  `MeshAnnouncingIsolationEnforcer` (C)
-- `enforcement/recovery.py` — `RecoveryExecutor` (async), `ActionHandler` ABC
+[unchanged]
 
-### Step 8: Runners
-- 8.1 `runners/monitor.py` — observation-only Monitor
-- 8.2 same — added isolation pipeline (decider + enforcer optional)
-- 8.3 same — added mesh + cross_check (Monitor does NOT own mesh lifecycle)
-- 8.4 `runners/coordinator.py` — election (lowest alive sysid) +
-  recovery orchestration. Uses `asyncio.run()` per recovery (PoC)
-- 8.5 `enforcement/handlers/{restart,loiter,filter}.py` — real
-  action handlers with `ProcessRunner` / `MavsdkRunner` DI seams
-- 8.6a `runners/factory.py` — configs → `WiredFleet`
-- 8.6b `runners/experiment.py` — `ExperimentRunner` orchestrator +
-  `RunResult`. Cleanup ALWAYS runs (try/finally)
-- 8.6b `runners/missions.py` — `MissionRunner` ABC + `NullMissionRunner`
-- 8.6b `attacks/base.py` — `AttackInjector` ABC + `NullAttackInjector`
+### Step 8: Runners (Monitor, Coordinator, factory, experiment)
+[unchanged]
 
-### Step 9: Attack injectors
-- `attacks/comm_disruption.py` — iptables DROP rule via
-  `SubprocessIptablesRunner` (default uses `sudo -n`)
-- `attacks/command_injection.py` — periodic MAVLink COMMAND_LONG with
-  spoofed sysid in background asyncio task. `PymavlinkSender` wraps
-  pymavlink sync API via `asyncio.to_thread`
-- `attacks/gps_spoofing.py` — PX4 SIM_GPS_NOISE param manipulation
-  via MAVSDK Param API. arm() captures original, cleanup() restores
-- All three attacks: arm/fire/cleanup lifecycle with try/finally
-  safety; cleanup ALWAYS runs and swallows exceptions
+### Step 9: Attack injectors (comm_disruption, command_injection, gps_spoofing)
+[unchanged]
 
-### Mission infrastructure (for step 10)
-- `runners/mission_mavsdk.py` — `MavsdkMissionRunner` orchestrates N
-  PX4 instances via MAVSDK; `DroneController` ABC + real implementation
-  + `ned_to_gps` conversion. `start()` runs connect/takeoff/upload/start
-  in parallel via `asyncio.gather`
+### Step 10a: First live PX4 integration WITHOUT mission ✓ NEW
+Closed in this iteration. Detection + isolation + real recovery
+verified end-to-end against three live PX4 SITL instances. Mission
+runner deliberately deferred to step 10b (port 14540 conflict — see
+§13). Architecture C used because it's the one with the value-add.
 
-### Step 12 analyzer (computed metrics)
-- `metrics/analyzer.py` — `RunMetrics` (per-run) + `AggregateMetrics`
-  (across runs). Reads `merged.jsonl` + `run_summary.json`,
-  computes MTTD/MTTR/impact/FP/FN. Linear-interpolation percentiles,
-  no numpy dependency. Graceful error handling: missing/corrupt files
-  → `error` field, not exceptions
+What was added in this step:
+
+- **`scripts/run_one.py`** — CLI driver for one experiment trial.
+  Flags: `--arch a|b|c`, `--attack none|comm_disruption|command_injection|gps_spoofing`,
+  `--mission mavsdk|null`, `--target-uav`, `--attack-at-sec`,
+  `--observation-after-attack-sec`, `--px4-pid-file`, `--dry-run`.
+  Reads the PID file written by `launch_px4.sh` and builds an
+  `ExternalAwareProcessRunner` so the recovery handler can kill the
+  right external PX4.
+- **`scripts/launch_px4.sh`** — launches 3 PX4 SITL instances
+  (gz_x500) in background. Auto-cleans stale ulog dirs before
+  launching (~100-200 MB per instance per run, 30 GB VM fills fast
+  otherwise). Writes PIDs in sysid order to `/tmp/px4_pids` (line 1
+  = sysid 1, etc.). First instance starts Gazebo; subsequent
+  instances attach. Refuses to launch if 14540/41/42 are already
+  bound.
+- **`scripts/kill_px4.sh`** — clean teardown via the PID file plus
+  pkill fallback. Also kills lingering `gz sim` / `gz-sim` /
+  `ruby gz` processes.
+
+#### Gap 1 (now closed): recovery events were missing from JSONL
+
+Symptom: `merged.jsonl` contained only `attack`, `security`,
+`isolation_announce` — but never `recovery_request` or
+`recovery_ack`. The Coordinator published these to the mesh but
+had no `EventLogger`, so the analyzer's MTTR computation had no
+timestamps to work with.
+
+Fix:
+- `Coordinator.__init__` now accepts `log_path: Optional[Path] =
+  None`. When provided it owns an `EventLogger` writing to
+  `coordinator_<uav>.jsonl`. Logs `RecoveryRequest` after publish
+  in `_on_isolation_announce`, and `RecoveryAck` after publish in
+  `_on_recovery_request`. Does NOT log received-ack copies (would
+  duplicate events on every peer).
+- `factory.py::_build_arch_c` passes `log_path=log_dir /
+  f"coordinator_{uav}.jsonl"` to each Coordinator.
+- `experiment.py::_finalize` already does `log_dir.glob("*.jsonl")`,
+  so the new coordinator files merge automatically.
+
+#### Gap 2 (now closed): RestartProcessHandler did no real restart
+
+Symptom: handler returned `success=True` but PIDs in `pgrep` were
+unchanged. The recovery measurement was time-to-ack, not
+time-to-actual-restart.
+
+Root cause: `DefaultProcessRunner.kill(uav_id)` looks up Popen in
+`self._handles`. Live PoC launches PX4 via `launch_px4.sh`, so
+those handles were empty → kill() was a silent no-op. Subsequent
+start() spawned a SECOND PX4 for the same instance, which crashed
+on port 14580 collision. Handler slept `start_timeout_sec` and
+returned success while the original PX4 stayed alive untouched.
+
+Fix:
+- New class `ExternalAwareProcessRunner` in
+  `enforcement/handlers/restart.py`. Constructor takes
+  `uav_to_initial_pid` map. First kill() per UAV signals that
+  external PID (SIGTERM → optional SIGKILL on timeout). Subsequent
+  kill()s use the tracked Popen as usual.
+- `RestartProcessHandler` already accepted `runner=` via its
+  constructor. `factory.py::_build_arch_c` now passes a shared
+  `process_runner` to every per-UAV handler. With a custom runner,
+  all 3 handlers share the same instance (required so the
+  `ExternalAwareProcessRunner` can hold one PID map covering all
+  UAVs).
+- `ExperimentRunner.__init__` accepts
+  `process_runner: Optional[ProcessRunner] = None`, forwards to
+  `build_fleet`.
+- `run_one.py` reads `/tmp/px4_pids` (line N → sysid N) and builds
+  the `ExternalAwareProcessRunner`. When the file doesn't exist
+  (e.g. tests, dry-runs without launch_px4), falls back to default
+  — no behaviour change for existing tests.
+
+Verified end-to-end: PID inst 0 changes (e.g. `155247 → 156528`)
+across a run with comm_disruption; MTTR rises to ~8 s reflecting
+real PX4 cold-start.
+
+#### Architectural improvement: isolation-aware coordinator election
+
+Discovered during step 10a debugging. The first live run produced
+zero recovery requests despite a successful isolation. Reason:
+`is_coordinator` was based on `peer_position` mesh liveness only,
+and the isolated UAV's mesh process kept publishing
+`peer_position` (mesh runs on ZMQ port 5550 — unaffected by the
+iptables DROP on MAVLink port 14540). So the isolated UAV remained
+the elected coordinator (lowest alive sysid) but was, by
+definition, unable to coordinate.
+
+Fix in `runners/coordinator.py`:
+- New `_isolated_sysids: set[int]`, updated by
+  `_on_isolation_announce` BEFORE the is_coordinator check, lifted
+  by successful `_on_recovery_ack`.
+- `is_coordinator` excludes isolated sysids from the alive set,
+  with a fast-path that immediately returns False if our own sysid
+  is isolated.
+- 6 new unit tests in `TestIsolationAwareElection`.
+
+This closes the trivial recursion where a UAV under attack could
+attempt to coordinate its own recovery. Worth a paragraph in
+Chapter 3 §3.4 (coordination_integrity property).
+
+### Mission infrastructure (for step 10b)
+- `runners/mission_mavsdk.py` exists, tested with FakeDroneController.
+  Real MAVSDK integration deferred to step 10b — see §13.
+
+### Step 12 analyzer (verified on first live data)
+- `metrics/analyzer.py::analyze_run` produces the metrics shown in
+  §1. Confirmed on a real run_dir from a live PX4 experiment.
 
 ---
 
-## 5. What's not done (only PX4-live work)
+## 5. What's not done
 
-### Step 10 — First end-to-end integration test
-Simplest combo: **Architecture C + comm_disruption + real PX4 SITL**.
-
-Tasks:
-- Launch 3 PX4 instances with `MavsdkMissionRunner`-compatible setup
-- Verify telemetry flows to monitors
-- Verify mesh peers reach each other (cross_check fires on real positions)
-- Trigger iptables drop → measure MTTD
-- Verify RestartProcessHandler launches new PX4 → heartbeats resume
-- Verify RecoveryAck propagates → `un_isolate` lifts
-- **Expected blockers**: port conflicts (MAVSDK vs telemetry listener
-  both want 14540?), home-position GPS lock timing, `sudo -n` for
-  iptables (CAP_NET_ADMIN setup), PX4 cold-start time
-
-This will take several iterations of run → see error → fix → repeat.
+### Step 10b — Add MAVSDK mission to the live integration
+Step 10a deliberately ran with `NullMissionRunner` (drones stay on
+the ground, telemetry still streams). Step 10b adds active flight
+via `MavsdkMissionRunner`. See §13 for the port 14540 conflict that
+must be resolved first.
 
 ### Step 11 — 3×3 matrix smoke
-For each (architecture, attack) combo: 1 trial. 9 total. Sanity that
-nothing crashes catastrophically. Not full statistics yet.
+For each (architecture, attack) combo: 1 trial. 9 total. With
+`run_one.py` already in place this is mostly a shell loop. Sanity
+that nothing crashes catastrophically across architectures.
 
 ### Step 12 (runs portion) — Full experiment + plots
-- Run the experiment (probably 100 trials per cell, ~30 wall-hours of SITL)
-- Run analyzer over results (analyzer code is done, just point it at
-  the results directory)
-- Generate plots for Chapter 5 (matplotlib code is NOT yet written —
-  add `metrics/plots.py` in this step)
-- Optional: add `psutil` sampling to `ExperimentRunner` for resource
-  overhead (CPU%, RAM) — NOT yet wired
+- Run the experiment (100 trials per cell, ~30 wall-hours of SITL)
+- Run analyzer over results (analyzer code is done)
+- Generate plots for Chapter 5 (matplotlib code not yet written —
+  add `metrics/plots.py`)
+- Optional: add `psutil` sampling for resource overhead
+
+### Open issues / nice-to-haves
+- **MTTR breakdown**: analyzer reports total MTTR but not the
+  decomposition (T_detect_to_isolate / T_isolate_to_decide /
+  T_action_execute). With Gap 1 closed all timestamps are now in
+  the JSONL chain — wiring this up is a 1-hour task in
+  `metrics/analyzer.py`. Useful for Chapter 5.
+- **`/tmp/px4_pids` becomes stale after a recovery**: after
+  `ExternalAwareProcessRunner` restarts a PX4, the PID file still
+  contains the OLD PID. Not a problem within one experiment run
+  (the runner tracks the fresh Popen internally), but a subsequent
+  `kill_px4.sh` will reference dead PIDs and the next
+  `launch_px4.sh` reads stale data. Re-run `launch_px4.sh` if you
+  want the PID file refreshed.
+- **iptables stale rules**: if a run crashes mid-attack, the DROP
+  rules stay. `comm_disruption` cleanup() is best-effort. Always
+  inspect with `sudo iptables -L INPUT -n | grep DROP` before a
+  fresh run; remove any leftovers (both `--dport` and `--sport`
+  variants — we saw both in practice).
+- **Disk fills extremely fast**: 30 GB VM, ulog per instance per
+  run = 100-200 MB. Three instances × ten runs = 4.5-6 GB. The
+  auto-cleanup in `launch_px4.sh` only catches ulogs from the
+  PREVIOUS launches; if you run experiments without re-launching
+  PX4, ulogs accumulate inside the running PX4 processes.
 
 ---
 
-## 6. File inventory
+## 6. File inventory (updated)
 
 ```
 csma_poc_v2/
@@ -239,312 +333,317 @@ csma_poc_v2/
 │   └── experiment.yaml
 │
 ├── detectors/                   (pure detectors)
-│   ├── base.py
-│   ├── heartbeat.py
-│   ├── command.py
-│   ├── gps.py
-│   └── cross_check.py
+│   └── base.py + heartbeat.py + command.py + gps.py + cross_check.py
 │
 ├── decision/                    (pure deciders)
-│   ├── isolation.py
-│   └── recovery.py
+│   └── isolation.py + recovery.py
 │
 ├── enforcement/                 (side effects)
 │   ├── isolation.py
 │   ├── recovery.py
 │   └── handlers/
-│       ├── __init__.py
-│       ├── restart.py           (subprocess + Popen tracking)
-│       ├── loiter.py            (MAVSDK action.hold())
-│       └── filter.py            (state-only; PoC simplification)
+│       ├── __init__.py          ★ NEW: exports ExternalAwareProcessRunner
+│       ├── restart.py           ★ NEW: ExternalAwareProcessRunner class
+│       ├── loiter.py
+│       └── filter.py
 │
 ├── runners/                     (orchestrators)
 │   ├── __init__.py
-│   ├── monitor.py               (per-UAV obs + isolation + mesh)
-│   ├── coordinator.py           (election + recovery orchestration)
-│   ├── factory.py               (configs → WiredFleet)
-│   ├── missions.py              (MissionRunner ABC + NullMissionRunner)
-│   ├── mission_mavsdk.py        (MavsdkMissionRunner for step 10)
-│   └── experiment.py            (full lifecycle orchestrator)
+│   ├── monitor.py
+│   ├── coordinator.py           ★ MODIFIED: log_path, isolation-aware election
+│   ├── factory.py               ★ MODIFIED: process_runner DI
+│   ├── missions.py
+│   ├── mission_mavsdk.py
+│   └── experiment.py            ★ MODIFIED: process_runner DI
 │
 ├── attacks/                     (concrete attacks)
-│   ├── __init__.py
-│   ├── base.py                  (AttackInjector ABC + Null)
-│   ├── comm_disruption.py       (iptables DROP)
-│   ├── command_injection.py     (MAVLink spoofed sysid loop)
-│   └── gps_spoofing.py          (MAVSDK param manipulation)
+│   └── base.py + comm_disruption.py + command_injection.py + gps_spoofing.py
 │
 ├── metrics/                     (analysis)
-│   ├── __init__.py
-│   └── analyzer.py              (MTTD/MTTR/FP/FN/impact)
+│   └── analyzer.py
 │
-├── scripts/
-│   └── smoke_telemetry.py
+├── scripts/                     ★ MOSTLY NEW
+│   ├── smoke_telemetry.py
+│   ├── run_one.py               ★ NEW: CLI for one experiment trial
+│   ├── launch_px4.sh            ★ NEW: launches 3 PX4 SITL instances
+│   └── kill_px4.sh              ★ NEW: clean teardown
 │
-└── tests/                       (24 test files, 422 tests)
+└── tests/                       (438 tests across many files)
+    ├── ... (existing test files)
+    └── test_handler_restart_external.py  ★ NEW: 10 tests for ExternalAware
 ```
 
 ---
 
-## 7. Test count timeline
+## 7. Test count timeline (updated)
 
 ```
 55 → 83 → 100 → 122 → 143 → 164 → 200 → 218 → 231 → 244 → 252
-→ 259 → 278 → 296 → 312 → 326 → 343 → 359 → 379 → 400 → 422 (current)
+→ 259 → 278 → 296 → 312 → 326 → 343 → 359 → 379 → 400 → 422
+→ 428 (isolation-aware election, +6) → 438 (ExternalAwareProcessRunner, +10)
 ```
 
-| Increment | What was added |
-|-----------|----------------|
-| 55 → 164  | Steps 5–6 (foundation, detectors) |
-| 164 → 231 | Step 7 (deciders + enforcers) |
-| 231 → 296 | Step 8.1–8.5 (monitor + coordinator + handlers) |
-| 296 → 326 | Step 8.6a + 8.6b (factory + experiment runner) |
-| 326 → 379 | Step 9 (3 attacks) |
-| 379 → 400 | MavsdkMissionRunner |
-| 400 → 422 | Analyzer |
-
 Quick sanity check: `python -m pytest tests/ -q | tail -3` →
-should report `422 passed`.
+should report **`438 passed`**.
 
 ---
 
 ## 8. Key design decisions with rationale
 
-### Why `cross_check` doesn't inherit `Detector`
-Detectors take `TelemetryEvent`s (own UAV's telemetry). CrossCheck
-takes `PeerPositionAnnounce`s (other UAVs' positions from mesh). Two
-different contracts → two different interfaces. Cross_check is wired
-separately on `Monitor` via `cross_check=` constructor param.
+[Previous sections unchanged, plus:]
 
-### Why mesh lifecycle is caller-owned
-Mesh can be shared between Monitor (publishes peer_position) and
-Coordinator (subscribes to isolation, recovery_req, recovery_ack) in
-the same process. If Monitor owned mesh.start/stop, the coord would
-not see early subscriptions. Tests must `mesh.start()` before
-`monitor.start()` and `mesh.stop()` after `monitor.stop()`.
+### Why isolation-aware election uses a separate `_isolated_sysids` set
+Election was on `_last_seen` (peer_position liveness) only. With
+mesh ZMQ on a different port from MAVLink, an isolated UAV stays
+mesh-alive forever after a comm_disruption attack — and stays
+elected coordinator under the old rule, blocking recovery. The
+`_isolated_sysids` set is a separate dimension: a peer is eligible
+for election only if it's both alive (recent peer_position) AND
+non-isolated. Cleanup happens on RecoveryAck(success=True).
 
-### Why `asyncio.run()` per recovery in coordinator
-Tradeoff. Pros: simple, no long-lived loop to manage. Cons: ~1 s
-overhead per call (loop creation + MAVSDK connect).
+### Why `process_runner` is shared across handlers (not per-handler)
+`ExternalAwareProcessRunner` holds a single PID map covering all
+UAVs. If each handler had its own runner, only one of them would
+know each PID. Sharing one runner makes the PID map accessible to
+all three handlers. The cost — losing the ability to inject
+different runners per UAV — is hypothetical, never used in
+practice.
 
-For PoC this is acceptable and explicit in Chapter 4. If real
-deployment needs many recoveries with persistent MAVSDK, refactor
-to `asyncio.run_coroutine_threadsafe` against a long-lived loop in
-a dedicated thread. Module docstring documents both paths.
+### Why coordinator logs RecoveryRequest/RecoveryAck only on publish
+A `RecoveryAck` published by the target UAV is received via mesh by
+all other coordinators too. If each receiver logged it, the merged
+file would contain three copies of every ack. Logging only on
+publish gives exactly one event per publish, with a
+publisher-side timestamp suitable for MTTR. The handler chain in
+the analyzer reconstructs full chronology via `caused_by`.
 
-### Why three sysids `{1, 2, 3, 255}`
-PX4 convention: 1, 2, 3 are the UAV autopilot sysids (instance+1);
-255 is the GCS (QGroundControl, MAVSDK). Anything else is an attacker.
+### Why MTTR is bound by PX4 cold-start (academic insight)
+First real run gave MTTR = 8.07 s, almost exactly
+`ProcessSpec.start_timeout_sec=8.0`. Decomposing:
+- T_detect_to_isolate ≈ 0 (Monitor publishes IsolationAnnounce
+  immediately after SecurityEvent)
+- T_isolate_to_decide ≈ 0 (Coordinator's RecoveryDecider is
+  synchronous, mesh latency is loopback)
+- T_action_execute ≈ 8.0 s (PX4 binary spawn + ready timeout)
 
-### Why attacker_sysid defaults to 99
-Outside the whitelist (so detector flags it) but innocuous-looking
-(not a magic value). Could be any 4-254 except {1, 2, 3, 255}.
-
-### Why MissionItem uses absolute GPS, not NED
-PX4 mission API expects lat/lon waypoints. NED is the input format
-(from config) but gets converted using each drone's own home position
-at mission start. This means same NED waypoints produce a coordinated
-formation flight relative to spawn positions.
-
-### Why analyzer metrics never raise
-Real experiment data is messy: missing files, runs killed mid-flight,
-corrupt JSON. The analyzer's contract is "return what you found,
-report what you couldn't" — populate `error` field instead of raising.
-Aggregation then skips errored runs. The dissertation can report
-dropout rate as a quality indicator.
+So **MTTR-restart is not architecture-dependent in this PoC** — it's
+the PX4 cold-start latency, a fixed lower bound common to all three
+architectures. What IS architecture-dependent is MTTD (different
+detection mechanisms) and impact_scope (centralized SPOF vs
+distributed). Chapter 5 should split MTTR into these components and
+honestly note the cold-start floor.
 
 ---
 
 ## 9. PoC simplifications (for Chapter 4)
 
-These are intentional gaps between PoC and a production deployment.
-**Document each in Chapter 4** with reasoning.
-
-| Simplification | Real deployment | Impact |
-|----------------|-----------------|--------|
-| ZeroMQ TCP loopback | FANET radio mesh | Same PUB/SUB semantics, different physical channel + latency |
-| `subprocess.Popen` kill+restart | Hot-failover / mission resume | MTTR dominated by PX4 cold start (~5–8s) |
-| `FilterCommandsHandler` state-only | iptables / mavlink-router | Real adds ~10–50 ms apply latency |
-| MAVSDK connection-per-call | Persistent gRPC connection | ~1 s overhead per loiter recovery |
-| Single-VM deployment via IPC | Distributed companion computers | Network latency = loopback, not WiFi |
-| Wall-clock timestamps | NTP/PTP-synced clocks | Single VM = coherent clocks "for free" |
-| GPS spoofing via SIM_GPS_NOISE | Real RF GPS spoofer | Approximation of effect, not method |
-| MTTD floor = 3 s for GPS | Whatever EKF takes | PX4 streams `ESTIMATOR_STATUS` at 1 Hz; detector needs 3 samples |
-| `asyncio.run()` per recovery | Long-lived event loop | OK for sync handlers; may need refactor for persistent MAVSDK |
-| 3 UAVs | 5–7 UAVs (generalized model) | PoC uses 3 for resource reasons; architecture scales |
-| iptables DROP rule (binary) | RF jamming (probabilistic) | Reproducible signal, less realistic |
-| Spoofed sysid attack | Could also forge legitimate sysid | Detection of stolen sysid requires signed MAVLink2 — out of scope |
-| Pymavlink sync API in asyncio.to_thread | Async-native MAVLink lib | Acceptable overhead; documented |
-
-**Framing**: the architectural model is the contribution, the PoC
-validates that the model can be implemented and that the metrics are
-meaningful. Limitations of the PoC are not limitations of the architecture.
+[Previous table unchanged]
 
 ---
 
-## 10. Environment specs
+## 10. Environment specs (updated)
 
 ### Host system
 - **Hardware**: Apple M4 Pro Mac
 - **VM**: UTM running Ubuntu 22.04 ARM64
-- **VM disk**: 30 GB. Clean PX4 logs regularly:
-  `rm -rf ~/PX4-Autopilot/build/px4_sitl_default/rootfs/*/log/`
+- **VM disk**: 30 GB. **Critically constrained.** Clean PX4 logs
+  before each run — `launch_px4.sh` does this automatically. If you
+  see "No space left on device", run:
+  ```
+  rm -rf ~/PX4-Autopilot/build/px4_sitl_default/rootfs/*/log/*
+  rm -rf ~/csma_poc_v2/runs/*
+  sudo apt clean
+  sudo journalctl --vacuum-size=100M
+  ```
 - **Python**: 3.10.12, venv at `~/csma_poc_v2/.venv`
 
 ### PX4 SITL
 - **Path**: `~/PX4-Autopilot`
 - **Build**: `make px4_sitl gz_x500`
-- **Launch per UAV**: `PX4_SYS_AUTOSTART=4001 PX4_GZ_MODEL=x500
-  PX4_GZ_MODEL_POSE="<offset>" ./build/px4_sitl_default/bin/px4 -i
-  <instance>`
+- **Launch**: `scripts/launch_px4.sh` (three instances, Gazebo on
+  first, writes PIDs to `/tmp/px4_pids`)
+- **Teardown**: `scripts/kill_px4.sh`
 
-### Process layout (3 UAVs)
-| UAV | PX4 `-i` | sysid | MAVLink in | MAVSDK out |
-|-----|----------|-------|------------|------------|
+### Process layout (3 UAVs) — verified in step 10a
+| UAV | PX4 `-i` | sysid | MAVLink in (Monitor) | MAVSDK out (mission, step 10b) |
+|-----|----------|-------|----------------------|--------------------------------|
 | uav_0 | 0 | 1 | `udpin:127.0.0.1:14540` | `udp://127.0.0.1:14540` |
 | uav_1 | 1 | 2 | `udpin:127.0.0.1:14541` | `udp://127.0.0.1:14541` |
 | uav_2 | 2 | 3 | `udpin:127.0.0.1:14542` | `udp://127.0.0.1:14542` |
 
-### Verified MAVLink stream rates (live SITL smoke test)
-- `HEARTBEAT` 1 Hz
-- `ESTIMATOR_STATUS` 1 Hz **← MTTD floor for GPS detector = 3s**
-- `GLOBAL_POSITION_INT` 49.8 Hz
-- `ATTITUDE` 99.5 Hz
-- `GPS_RAW_INT` 30 Hz
-- `LOCAL_POSITION_NED` 30 Hz
-- `SYS_STATUS` 5 Hz
+### Live SITL packet flow (observed in step 10a)
+PX4 inst i sends MAVLink:
+- Normal stream → `udp port 1857{i} → remote port 14550` (QGC channel)
+- Onboard stream → `udp port 1458{i} → remote port 1454{i}` (MAVSDK/pymavlink channel)
+- Other channels: `1428{i}→1403{i}` (uxrce_dds), `1303{i}→1328{i}` (gimbal)
 
-### Mesh endpoints (Architecture C)
-| UAV | ZMQ endpoint |
-|-----|--------------|
-| uav_0 | `tcp://127.0.0.1:5550` |
-| uav_1 | `tcp://127.0.0.1:5551` |
-| uav_2 | `tcp://127.0.0.1:5552` |
+PX4 is the **sender** on 1454{i}; whoever listens there receives
+the stream. Two listeners on the same port = port conflict (see
+§13).
 
-### iptables / sudo (Step 10 requirement)
-Comm_disruption attack requires either passwordless sudo or
-CAP_NET_ADMIN on the python interpreter:
-
+### iptables / sudo (Step 10a verified working)
+Comm_disruption requires passwordless sudo for iptables:
 ```bash
-# Option A: passwordless sudo for iptables
-sudo visudo
-# Add line: youruser ALL=(ALL) NOPASSWD: /usr/sbin/iptables
+sudo visudo -f /etc/sudoers.d/csma-iptables
+# Add: youruser ALL=(ALL) NOPASSWD: /usr/sbin/iptables
+```
 
-# Option B: grant CAP_NET_ADMIN (preferable, no sudo)
-sudo setcap cap_net_admin+ep $(realpath $(which python3))
+CAP_NET_ADMIN on Python does **not** work for this — `iptables` is
+a separate binary, capabilities don't pass through `subprocess`.
+Use sudo.
+
+**Watch for stale rules from crashed runs**:
+```bash
+sudo iptables -L INPUT -n | grep DROP
+# If anything remains, remove BOTH --dport and --sport variants:
+for port in 14540 14541 14542; do
+  while sudo iptables -D INPUT -p udp --dport $port -j DROP 2>/dev/null; do :; done
+done
+for sport in 14580 14581 14582; do
+  while sudo iptables -D INPUT -p udp --sport $sport -j DROP 2>/dev/null; do :; done
+done
 ```
 
 ---
 
-## 11. Common mistakes to avoid
+## 11. Common mistakes to avoid (updated)
 
-### Don't break the architecture rule
-The temptation will be high. Resist. If the wiring is awkward, the
-fix is usually a new config flag, a new DI seam, or a new class. Not
-an `if`.
+[Previous list, plus:]
 
-### Don't forget mesh.start() in tests with real ZmqMesh
-Monitor doesn't own mesh lifecycle. If you write an integration test
-with `ZmqMesh` and forget to call `mesh_a.start()` before
-`monitor_a.start()`, the test will hang on receive.
+### When applying multi-point patches, give a full file replace
+We learned this twice: the `_isolated_sysids` initialization went
+missing on the first patch, the `log_path` parameter went missing
+on the second. Multi-step diffs through GitHub UI / manual edits
+lose one step every time. For any change touching > 2 spots in a
+single file, hand the user a full replacement file via
+`present_files`. One atomic copy is reliable.
 
-### Don't use `subprocess.Popen` without tracking handles
-`DefaultProcessRunner` tracks handles per uav_id. Never use
-`pkill -f "px4.*-i 1"` — pattern matching can hit unrelated processes.
+### When a new live PX4 setup looks broken, check iptables FIRST
+We chased "PX4 inst 2 doesn't send heartbeat" for 30 minutes
+before realising the previous comm_disruption run had left
+`DROP udp dpt:14542` AND `DROP udp spt:14582` rules. Always
+inspect `iptables -L INPUT -n` before debugging UDP receive issues.
 
-### Be careful with SecurityEvent fields
-- `severity` is in `{low, medium, high}` (not "critical")
-- No `reason` field on `SecurityEvent` — that's on `IsolationAnnounce`
-- `evidence` is the dict for raw values
+### Don't trust pgrep alone to verify "restart happened"
+`pgrep` shows PIDs but doesn't reveal whether the handler's
+spawned process and the one you're seeing are the same. Capture
+PID inst 0 before the run (`head -1 /tmp/px4_pids`) and compare
+to `pgrep -f 'px4 -i 0$'` after. If they differ → real restart
+happened.
 
-### AttackEvent uses `attack_type`, not `attack_name`
-Got bitten once. The injector's `name` property maps to `attack_type=`
-keyword in AttackEvent. Don't conflate.
+### Gazebo state lingers across PX4 launches
+If a previous `launch_px4.sh` was killed un-cleanly, Gazebo can
+keep running with its own simulation time accumulated. New PX4
+instances then see `lockstep_scheduler] setting initial absolute
+time to 95168848000 us` (~26 hours), EKF fails, telemetry breaks.
+`launch_px4.sh` and `kill_px4.sh` both attempt cleanup, but if
+weirdness persists:
+```bash
+pkill -9 -f 'gz sim' ; pkill -9 -f 'gz-sim' ; pkill -9 -f 'ruby.*gz'
+rm -rf /tmp/.gz* ~/.gz/log/*
+```
 
-### Attack phases are `inject_start` / `inject_end`
-The runner emits `inject_start` after fire() and `inject_end` after
-the observation window. The events.py comment mentions `inject_active`
-as a possibility, but the runner uses only the two end markers.
-Analyzer keys MTTD off `inject_start`.
-
-### `attacker_sysid` MUST be outside `{1, 2, 3, 255}`
-Otherwise `CommandInjectionDetector` won't flag it as spoofed and the
-attack produces a null result. Defaults to 99. Constructor enforces.
-
-### MAVSDK connection-per-call is intentional
-`DefaultMavsdkRunner`, `DefaultGpsSpoofingRunner`,
-`MavsdkDroneController` all create short-lived `System()` instances.
-Don't try to "optimize" by sharing — the asyncio loop lifetime in
-`asyncio.run()` per recovery makes that complicated.
-
-### `sudo -n` for iptables in CI
-`SubprocessIptablesRunner` uses `sudo -n` (non-interactive). If sudo
-asks for password, the command fails. Either configure passwordless
-sudo or use CAP_NET_ADMIN.
-
-### PX4 cold start is slow
-`ProcessSpec.start_timeout_sec=8.0` may need bumping on slower
-hardware. If MTTR measurements look weird, check whether PX4 actually
-came back up within the timeout.
-
-### Disk fills fast
-PX4 SITL writes ulog files to `rootfs/<instance>/log/`. Each run can
-be 100–200 MB. Run counts × 3 instances × 200 MB = problem.
-Clean before each batch.
-
-### Don't bypass `present_files`
-The user can't see files in `/home/claude/csma_poc_v2/` directly.
-After every step:
-1. Copy from sandbox to `/mnt/user-data/outputs/csma_poc_v2/`
-2. Call `present_files` listing the staged paths
-3. Tell user the exact source paths and expected pytest count
+### Don't worry about `runners/__init__.py` being empty
+It is, intentionally. Python's implicit namespace packaging works
+fine. Existing imports like `from runners.experiment import
+ExperimentRunner` work without anything in `__init__.py`.
 
 ---
 
-## 12. How to continue (handoff to step 10)
+## 12. How to continue (handoff to step 10b)
 
 Assuming a new chat starts with this repo cloned and this file read:
 
-1. **Acknowledge the state.** "422 passing tests, all non-PX4 code
-   complete, ready for step 10 — first live integration run."
+1. **Acknowledge the state.** "438 tests passing. Step 10a complete:
+   detection → isolation → real PX4 restart → ack verified end-to-end
+   with first MTTD/MTTR numbers. Step 10b adds MAVSDK mission for
+   active flight."
 
-2. **Set up sudo / CAP_NET_ADMIN.** Before any iptables-based attack
-   can fire, either:
-   - Add `youruser ALL=(ALL) NOPASSWD: /usr/sbin/iptables` to sudoers, OR
-   - `sudo setcap cap_net_admin+ep $(realpath $(which python3))` on
-     the venv interpreter
+2. **The blocker for step 10b: port 14540 conflict.** See §13 below
+   for full options.
 
-3. **Write a step-10 integration script.** Something like
-   `scripts/run_one.py` that:
-   - Takes architecture and attack name as CLI args
-   - Calls `build_fleet` + `ExperimentRunner.run()`
-   - Reports the run directory at exit
+3. **Recommended starting combo for 10b**: same as 10a — Architecture
+   C + comm_disruption. Once mission works, expand to other attacks.
 
-4. **First combo to try**: Architecture C + comm_disruption.
-   Simplest because iptables is binary (heartbeat dies = detected).
-   Watch for:
-   - **Port conflict** on 14540: telemetry listener binds (udpin)
-     and MAVSDK connects (udp://) on same port. May need to use
-     different MAVSDK port (PX4 SITL default has both 14540 and 14580
-     available; check `mavlink start` config in PX4 startup script).
-   - **Mesh peer connection timing**: ZmqMesh slow-joiner workaround
-     gives 0.3s window. May need bigger window if startup is slow.
-   - **Home position GPS lock**: `MavsdkDroneController.get_home_position`
-     waits for `telemetry.home()` — may hang if GPS isn't ready
-     within timeout. Add deadline.
+---
 
-5. **Once one combo works**, scale to the 3×3 matrix (step 11), then
-   to the full experiment (step 12). Analyzer is ready — point it at
-   the results directory and it'll produce the Chapter 5 numbers.
+## 13. Step 10b blocker: port 14540 conflict (detailed)
 
-6. **Not yet wired**:
-   - Resource overhead (CPU%/RAM) sampling via psutil
-   - `metrics/plots.py` for matplotlib graphs (only JSON summary right
-     now)
+### The problem
 
-If anything in this document feels incomplete or contradicts what you
-see in code, the **code is authoritative**. This file is a navigation
-aid, not a spec.
+PX4 SITL inst 0 sends its onboard MAVLink stream to
+`127.0.0.1:14540`. Both of the following need to read from this
+port simultaneously, and Linux UDP semantics make that very hard:
+
+1. **Monitor** uses pymavlink with `udpin:127.0.0.1:14540` — binds
+   the port and reads.
+2. **MAVSDK mission** uses `udp://127.0.0.1:14540` — also binds the
+   port (server mode in MAVSDK convention).
+
+In step 10a we bypassed this by using `NullMissionRunner` — only
+Monitor binds 14540, MAVSDK is not active. For 10b we need both.
+
+### Options to resolve
+
+**Option A: mavlink-router (recommended).**
+Run `mavlink-router` as an intermediate process per UAV. PX4 sends
+to mavlink-router; mavlink-router forwards each packet to both
+Monitor's port AND MAVSDK's port. The PoC convention would become:
+
+- PX4 inst i sends to a single endpoint (configured by env var or
+  PX4 startup script tweak)
+- mavlink-router listens, forwards to 14540+i (Monitor) and 14560+i
+  (MAVSDK)
+- Monitor reads from 14540+i as before
+- MavsdkMissionRunner reads from 14560+i
+
+Pros: clean separation; mavlink-router is a known, packaged tool;
+no PX4 internals changed. Cons: extra process per UAV (3 more);
+extra deployment step.
+
+**Option B: second MAVLink stream from PX4.**
+Modify PX4 startup script (`etc/init.d-posix/rcS` or equivalent) to
+add a second `mavlink start` command on a different port:
+```
+mavlink start -x -u $((14560+px4_instance)) -r 4000000 -m onboard
+```
+Then MavsdkMissionRunner connects to 14560+i. Monitor stays on
+14540+i.
+
+Pros: no extra processes. Cons: requires patching the PX4 source's
+startup script (or overriding it via `PX4_GZ_STANDALONE` or per-
+instance custom rcS), which is fragile across PX4 upgrades.
+
+**Option C: drop pymavlink Monitor in favour of MAVSDK telemetry.**
+Rewrite Monitor's telemetry consumption to use MAVSDK's
+`drone.telemetry.heartbeat()` etc. Then MAVSDK owns 14540+i alone.
+
+Pros: single MAVLink consumer per UAV. Cons: substantial Monitor
+rewrite; gives up pymavlink's wider message coverage; MAVSDK's
+telemetry API is less granular for our detector needs (GPS noise,
+specific COMMAND_LONG inspection).
+
+**Option D: SO_REUSEPORT.**
+Linux allows multiple UDP sockets to bind the same port with
+SO_REUSEPORT — the kernel load-balances incoming packets. Neat in
+theory, terrible in practice: each socket gets a random subset of
+packets. Monitor would miss half the heartbeats, MAVSDK would miss
+half the telemetry. Don't use.
+
+### Recommended path: Option A
+
+Steps for a new chat:
+1. Install mavlink-router: `apt install mavlink-router` (or build
+   from source — recent versions matter for PX4 compatibility).
+2. Write a config per UAV that listens on a port PX4 sends to (could
+   be 14540+i if we move Monitor & MAVSDK both off it) and forwards
+   to two endpoints.
+3. Add `scripts/launch_router.sh` analogous to `launch_px4.sh`.
+4. Update `experiment.yaml`'s `telemetry.endpoints` to point Monitor
+   at one set of ports; update `MavsdkMissionRunner` factory in
+   `run_one.py` to use the other set.
+5. Smoke test with `--mission mavsdk --attack none` first (real
+   flight, no attack). When that flies, add comm_disruption back.
 
 ---
 
@@ -554,7 +653,12 @@ aid, not a spec.
 - Output staging: `/mnt/user-data/outputs/csma_poc_v2/`
 - Repo (user's): `~/csma_poc_v2/`
 - Run tests: `python -m pytest tests/ -q | tail -3`
-- Expected count: **422 passed**
-- Smoke test: `python scripts/smoke_telemetry.py` (needs live PX4)
+- Expected count: **438 passed**
+- Live smoke (no flight): `scripts/launch_px4.sh && python scripts/run_one.py
+  --arch c --attack comm_disruption --mission null --attack-at-sec 10
+  --observation-after-attack-sec 30`
+- Analyze last run: `python -c "from pathlib import Path;
+  from metrics.analyzer import analyze_run; from pprint import pp;
+  pp(analyze_run(sorted(Path('runs').iterdir())[-1]))"`
 
 End of handoff document.
