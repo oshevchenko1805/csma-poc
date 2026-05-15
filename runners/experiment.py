@@ -48,6 +48,7 @@ from attacks.base import AttackContext, AttackInjector, NullAttackInjector
 from core.config import ArchitectureConfig, ExperimentConfig
 from core.events import AttackEvent
 from core.logger import EventLogger, merge_jsonl
+from enforcement.handlers import ProcessRunner
 from runners.factory import (
     ConnectionFactory,
     MeshFactory,
@@ -94,6 +95,7 @@ class ExperimentRunner:
         connection_factory: Optional[ConnectionFactory] = None,
         mesh_factory: Optional[MeshFactory] = None,
         px4_path: Optional[Path] = None,
+        process_runner: Optional[ProcessRunner] = None,
     ) -> None:
         if attack_at_sec < 0:
             raise ValueError("attack_at_sec must be non-negative")
@@ -114,6 +116,7 @@ class ExperimentRunner:
         self._connection_factory = connection_factory
         self._mesh_factory = mesh_factory
         self._px4_path = px4_path
+        self._process_runner = process_runner
 
         # State filled during run()
         self._fleet: Optional[WiredFleet] = None
@@ -159,6 +162,7 @@ class ExperimentRunner:
             connection_factory=self._connection_factory,
             mesh_factory=self._mesh_factory,
             px4_path=self._px4_path,
+            process_runner=self._process_runner,
         )
         # Dedicated logger for attack ground-truth markers, lives
         # alongside monitor logs in the run directory.

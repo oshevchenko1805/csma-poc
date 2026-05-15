@@ -18,6 +18,10 @@ Dependency injection points
   verified without bringing up live MAVLink.
 - mesh_factory: builds a MeshBus given (self_endpoint, peer_endpoints).
   Default: ZmqMesh for C, NoOpMesh for A/B. Tests can override.
+- process_runner: ProcessRunner used by RestartProcessHandler
+  (Architecture C only). Default: a fresh DefaultProcessRunner per
+  handler. Pass an ExternalAwareProcessRunner when PX4 instances were
+  launched out-of-band (live PoC pipeline via scripts/launch_px4.sh).
 
 PX4 SITL defaults
 -----------------
@@ -51,6 +55,7 @@ from detectors.heartbeat import HeartbeatDetector
 from enforcement.handlers import (
     FilterCommandsHandler,
     ModeLoiterHandler,
+    ProcessRunner,
     ProcessSpec,
     RestartProcessHandler,
 )
@@ -192,8 +197,18 @@ def build_fleet(
     px4_path: Optional[Path] = None,
     connection_factory: Optional[ConnectionFactory] = None,
     mesh_factory: Optional[MeshFactory] = None,
+    process_runner: Optional[ProcessRunner] = None,
 ) -> WiredFleet:
-    """Assemble all components required for one experiment run."""
+    """Assemble all components required for one experiment run.
+
+    Parameters
+    ----------
+    process_runner
+        ProcessRunner shared by ALL per-UAV RestartProcessHandlers in
+        Architecture C. None (default) means each handler creates its
+        own DefaultProcessRunner. Pass an ExternalAwareProcessRunner
+        when PX4 instances were launched out-of-band.
+    """
 
     # Set up paths.
     log_dir = Path(log_root) / f"run_{run_id}"
@@ -227,6 +242,7 @@ def build_fleet(
             px4_path=px4_path or Path.home() / "PX4-Autopilot",
             connection_factory=connection_factory,
             mesh_factory=mesh_factory or _default_mesh_factory,
+            process_runner=process_runner,
         )
     else:
         raise ValueError(f"unknown architecture {arch_cfg.architecture!r}")
@@ -308,6 +324,7 @@ def _build_arch_c(
     px4_path: Path,
     connection_factory: Optional[ConnectionFactory],
     mesh_factory: MeshFactory,
+    process_runner: Optional[ProcessRunner] = None,
 ) -> WiredFleet:
     # Validate that arch.mesh.endpoints covers every monitor's UAV.
     # (load_architecture_config already enforces this, but keep the
@@ -389,8 +406,14 @@ def _build_arch_c(
         process_spec = _default_process_spec(
             uav_id=uav_id, sysid=ep.sysid, px4_path=px4_path
         )
+        # If the caller provided a shared ProcessRunner (typically an
+        # ExternalAwareProcessRunner that knows about externally-
+        # launched PX4 instances), share it across all per-UAV
+        # RestartProcessHandlers. Otherwise each handler defaults to
+        # its own DefaultProcessRunner.
         restart_handler = RestartProcessHandler(
-            specs={uav_id: process_spec}
+            specs={uav_id: process_spec},
+            runner=process_runner,
         )
         loiter_handler = ModeLoiterHandler(
             endpoints={uav_id: _default_mavsdk_endpoint(sysid=ep.sysid)}
