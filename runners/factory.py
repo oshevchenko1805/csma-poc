@@ -431,6 +431,7 @@ def _build_arch_c(
             recovery_decider=recovery_decider,
             recovery_executor=executor,
             on_recovery_completed=_make_callback(),
+            log_path=log_dir / f"coordinator_{uav_id}.jsonl",
         )
         coordinators.append(coord)
 
