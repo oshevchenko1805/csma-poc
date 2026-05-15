@@ -70,6 +70,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from pathlib import Path
 from typing import Callable, Optional
 
 from core.events import (
@@ -79,6 +80,7 @@ from core.events import (
     RecoveryRequest,
 )
 from core.mesh import MeshBus
+from core.logger import EventLogger
 from decision.recovery import RecoveryDecider
 from enforcement.recovery import RecoveryExecutor
 
@@ -162,6 +164,13 @@ class Coordinator:
         self._n_skipped_not_target: int = 0
 
         self._started: bool = False
+        # Optional JSONL logger for recovery events (RecoveryRequest,
+        # RecoveryAck published by this coordinator). Reconstructs the
+        # SecurityEvent -> IsolationAnnounce -> RecoveryRequest ->
+        # RecoveryAck chain for the analyzer.
+        self._logger: Optional[EventLogger] = (
+            EventLogger(log_path) if log_path is not None else None
+        )
 
     # ----- lifecycle -----
 
@@ -173,6 +182,8 @@ class Coordinator:
 
     def stop(self) -> None:
         self._started = False
+        if self._logger is not None:
+            self._logger.close()
 
     # ----- election -----
 
@@ -243,6 +254,17 @@ class Coordinator:
             "skipped_not_target": self._n_skipped_not_target,
         }
 
+    # ----- logging -----
+
+    def _safe_log(self, event) -> None:
+        """Log via the EventLogger if configured; never raises."""
+        if self._logger is None:
+            return
+        try:
+            self._logger.log(event)
+        except Exception:
+            self._n_handler_errors += 1
+          
     # ----- mesh callbacks -----
 
     def _on_peer_position(self, ann) -> None:
@@ -281,6 +303,7 @@ class Coordinator:
         try:
             self._mesh.publish(request)
             self._n_recovery_requests_issued += 1
+            self._safe_log(request)
         except Exception:
             self._n_handler_errors += 1
 
@@ -309,6 +332,7 @@ class Coordinator:
         self._n_recovery_requests_executed += 1
         try:
             self._mesh.publish(ack)
+            self._safe_log(ack)
         except Exception:
             self._n_handler_errors += 1
 
