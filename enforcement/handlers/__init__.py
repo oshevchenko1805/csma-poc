@@ -8,6 +8,7 @@ from enforcement.handlers.loiter import (
 )
 from enforcement.handlers.restart import (
     DefaultProcessRunner,
+    ExternalAwareProcessRunner,
     ProcessRunner,
     ProcessSpec,
     RestartProcessHandler,
@@ -21,5 +22,6 @@ __all__ = [
     "RestartProcessHandler",
     "ProcessRunner",
     "DefaultProcessRunner",
+    "ExternalAwareProcessRunner",
     "ProcessSpec",
 ]
