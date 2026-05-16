@@ -4,8 +4,13 @@
 # given as local NED offsets from each UAV's home position so the same
 # trajectory pattern works regardless of where Gazebo places spawns.
 #
-# Telemetry endpoints: PX4 SITL instance i exposes its onboard MAVLink
-# stream on udpin:127.0.0.1:14540+i with sysid i+1.
+# Telemetry endpoints: PX4 SITL instance i sends its onboard MAVLink
+# stream to UDP 127.0.0.1:14540+i. As of step 10b this is intercepted
+# by a mavlink-router instance per UAV (scripts/launch_router.sh) and
+# fanned out to two consumers:
+#   - Monitor (pymavlink udpin) on 127.0.0.1:14570+i  ← endpoints below
+#   - MAVSDK (mavsdk_server)    on 127.0.0.1:14560+i  ← scripts/run_one.py
+# This resolves the port-14540 conflict documented in PROJECT_STATE §13.
 #
 # Attacks: three representative cases enumerated in dissertation §3.5.3.
 #
@@ -29,13 +34,13 @@ mission:
 telemetry:
   endpoints:
     - uav_id: uav_0
-      endpoint: udpin:127.0.0.1:14540
+      endpoint: udpin:127.0.0.1:14570
       sysid: 1
     - uav_id: uav_1
-      endpoint: udpin:127.0.0.1:14541
+      endpoint: udpin:127.0.0.1:14571
       sysid: 2
     - uav_id: uav_2
-      endpoint: udpin:127.0.0.1:14542
+      endpoint: udpin:127.0.0.1:14572
       sysid: 3
 
 attacks:

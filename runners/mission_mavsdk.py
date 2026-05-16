@@ -152,24 +152,44 @@ class MavsdkDroneController(DroneController):
         *,
         connect_timeout_sec: float = DEFAULT_CONNECT_TIMEOUT_SEC,
         action_timeout_sec: float = DEFAULT_ACTION_TIMEOUT_SEC,
+        grpc_port: Optional[int] = None,
     ) -> None:
         self._endpoint = endpoint
         self._connect_timeout = connect_timeout_sec
         self._action_timeout = action_timeout_sec
+        # Per-instance gRPC port; required to avoid 50051 collisions when
+        # multiple Systems run in parallel (step 10b empirically verified).
+        self._grpc_port = grpc_port
         self._drone = None  # mavsdk.System, set on connect
 
     async def connect(self) -> None:
         from mavsdk import System  # lazy
 
-        self._drone = System()
+        # Per-instance gRPC port: default port 50051 collides between
+        # parallel mavsdk_server subprocesses, only one wins the bind.
+        if self._grpc_port is None:
+            self._drone = System()
+        else:
+            self._drone = System(port=self._grpc_port)
         await asyncio.wait_for(
             self._drone.connect(system_address=self._endpoint),
             timeout=self._connect_timeout,
         )
-        # Block until connection established.
+        # First, wait until the first heartbeat arrives ('discovered').
         async for state in self._drone.core.connection_state():
             if state.is_connected:
-                return
+                break
+        # Then wait until the drone is actually ready. PX4 reports
+        # is_connected on first heartbeat, but param subsystem and
+        # EKF/GPS take much longer to converge. Without this wait any
+        # immediate param op (set_takeoff_altitude) is silently ignored.
+        # Step 10b diagnosed empirically: PX4 SITL on M4 Pro ARM64
+        # reaches is_armable in ~30-60s.
+        async def _wait_armable():
+            async for h in self._drone.telemetry.health():
+                if h.is_armable:
+                    return
+        await asyncio.wait_for(_wait_armable(), timeout=90.0)
 
     async def get_home_position(self) -> tuple[float, float, float]:
         assert self._drone is not None

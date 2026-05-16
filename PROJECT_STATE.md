@@ -662,3 +662,13 @@ Steps for a new chat:
   pp(analyze_run(sorted(Path('runs').iterdir())[-1]))"`
 
 End of handoff document.
+
+---
+
+## Step 10b — CLOSED (live MAVSDK mission)
+
+**Status:** §13 port-14540 blocker RESOLVED via Option A (mavlink-router fan-out per UAV). First end-to-end live trial with active 3-UAV flight: MTTD=3.28s, MTTR=8.07s, detected=True, recovery_success=True, impact_scope=1. 438 tests passing.
+
+**See [STEP_10B_NOTES.md](STEP_10B_NOTES.md) for full closeout** — new files, MavsdkDroneController patches (grpc_port + wait_armable), environment changes (VM disk 30→100 GB), known limitations, reproduction commands.
+
+**Pre-flight for next step:** `DefaultMavsdkRunner` (loiter recovery) and `DefaultGpsSpoofingRunner` (GPS attack) still use default gRPC port 50051; will collide with mission controllers (50051-50053). Patch needed before testing `--attack gps_spoofing` or loiter-based recovery action.

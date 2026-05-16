@@ -211,20 +211,33 @@ def build_mavsdk_mission(
 ) -> MavsdkMissionRunner:
     """Build MavsdkMissionRunner from experiment config.
 
-    MAVSDK endpoint per UAV follows the PX4 SITL convention:
-      port = 14540 + (sysid - 1)
-      url  = "udp://127.0.0.1:<port>"
+    MAVSDK endpoint per UAV uses the mavlink-router MAVSDK fan-out (Option A):
+      port = 14560 + (sysid - 1)
+      url  = "udpin://0.0.0.0:<port>"
+
+    Each MavsdkDroneController also gets its own gRPC port (50051 + i) so
+    three parallel mavsdk_server subprocesses don't collide on the default.
+    Verified empirically in step 10b parallel-probe.
 
     Ordered by sysid so endpoint[i] corresponds to UAV with sysid=i+1.
     """
+    from runners.mission_mavsdk import MavsdkDroneController
+
     endpoints: list[str] = []
+    endpoint_to_grpc: dict[str, int] = {}
     for ep in sorted(exp_cfg.telemetry.endpoints, key=lambda e: e.sysid):
-        port = 14540 + (ep.sysid - 1)
-        endpoints.append(f"udp://127.0.0.1:{port}")
+        port = 14560 + (ep.sysid - 1)
+        url = f"udpin://0.0.0.0:{port}"
+        endpoints.append(url)
+        endpoint_to_grpc[url] = 50051 + (ep.sysid - 1)
+
+    def factory(ep: str):
+        return MavsdkDroneController(ep, grpc_port=endpoint_to_grpc[ep])
 
     return MavsdkMissionRunner(
         endpoints=endpoints,
         waypoints=list(exp_cfg.mission.waypoints),
+        controller_factory=factory,
         takeoff_altitude_m=takeoff_altitude_m,
     )
 
