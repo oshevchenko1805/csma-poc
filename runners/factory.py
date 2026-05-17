@@ -34,6 +34,21 @@ overridable via px4_path.
 If your local SITL build lives elsewhere or uses different env vars
 (e.g. ROS_DOMAIN_ID, GZ_PARTITION), pass a custom px4_path or, for
 deeper customisation, build the WiredFleet manually.
+
+MAVSDK gRPC port allocation (step 10c)
+--------------------------------------
+Architecture C's recovery pipeline now runs MAVSDK consumers in
+parallel with the three mission controllers (which already use
+50051-50053 — see scripts/run_one.py). To prevent
+`AioRpcError: Socket closed` from gRPC bind collisions, each per-UAV
+ModeLoiterHandler is constructed with a DefaultMavsdkRunner pinned to
+LOITER_GRPC_PORT_BASE + (sysid - 1), i.e. 50054 / 50055 / 50056.
+The GPS-spoofing injector's runner is wired separately in
+run_one.py with grpc_port=50057. Layout:
+
+    50051-50053  MavsdkDroneController (mission, one per UAV)
+    50054-50056  DefaultMavsdkRunner   (loiter recovery, one per UAV)
+    50057        DefaultGpsSpoofingRunner (one-shot, per attack run)
 """
 
 from __future__ import annotations
@@ -53,6 +68,7 @@ from detectors.cross_check import CrossCheckDetector
 from detectors.gps import GpsSpoofingDetector
 from detectors.heartbeat import HeartbeatDetector
 from enforcement.handlers import (
+    DefaultMavsdkRunner,
     FilterCommandsHandler,
     ModeLoiterHandler,
     ProcessRunner,
@@ -75,6 +91,19 @@ ConnectionFactory = Callable[[str], object]
 
 MeshFactory = Callable[[str, list[str]], MeshBus]
 """(self_endpoint, peer_endpoints) -> MeshBus."""
+
+
+# ---------------------------------------------------------------------------
+# gRPC port allocation
+# ---------------------------------------------------------------------------
+
+LOITER_GRPC_PORT_BASE: int = 50054
+"""Base gRPC port for per-UAV loiter mavsdk_server subprocesses.
+
+Mission controllers use 50051-50053 (see scripts/run_one.py); loiter
+handlers use 50054 + (sysid - 1) so each lives on its own port and
+parallel mavsdk_server instances don't collide. See module docstring.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -415,8 +444,15 @@ def _build_arch_c(
             specs={uav_id: process_spec},
             runner=process_runner,
         )
+        # Loiter runner pinned to a UAV-specific gRPC port so concurrent
+        # MAVSDK consumers (mission controllers on 50051-50053, plus
+        # this handler) don't fight for the default 50051.
+        loiter_runner = DefaultMavsdkRunner(
+            grpc_port=LOITER_GRPC_PORT_BASE + (ep.sysid - 1)
+        )
         loiter_handler = ModeLoiterHandler(
-            endpoints={uav_id: _default_mavsdk_endpoint(sysid=ep.sysid)}
+            endpoints={uav_id: _default_mavsdk_endpoint(sysid=ep.sysid)},
+            runner=loiter_runner,
         )
         filter_handler = FilterCommandsHandler()
         filter_handlers.append(filter_handler)

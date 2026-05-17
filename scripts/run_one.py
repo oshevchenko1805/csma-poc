@@ -53,7 +53,10 @@ if str(REPO_ROOT) not in sys.path:
 from attacks.base import AttackInjector, NullAttackInjector  # noqa: E402
 from attacks.command_injection import CommandInjectionInjector  # noqa: E402
 from attacks.comm_disruption import CommDisruptionInjector  # noqa: E402
-from attacks.gps_spoofing import GpsSpoofingInjector  # noqa: E402
+from attacks.gps_spoofing import (  # noqa: E402
+    DefaultGpsSpoofingRunner,
+    GpsSpoofingInjector,
+)
 from core.config import (  # noqa: E402
     ExperimentConfig,
     load_architecture_config,
@@ -91,11 +94,25 @@ CONFIGS_DIR = REPO_ROOT / "configs"
 #   step 10a either — it only sends there — so the flight is no less
 #   affected than in 10a). The class default remains 14540 so unit
 #   tests and any non-router-fronted scenarios are unaffected.
+#
+# gps_spoofing grpc_port note (step 10c):
+#   DefaultGpsSpoofingRunner uses mavsdk.System() which defaults to
+#   gRPC port 50051. Mission controllers (run_one.py build_mavsdk_mission)
+#   already hold 50051-50053, and the per-UAV loiter handlers
+#   (runners/factory.py LOITER_GRPC_PORT_BASE) hold 50054-50056. Pin
+#   the injector's runner to 50057 so its short-lived mavsdk_server
+#   subprocess doesn't collide. The injector's UDP endpoint
+#   (port_base=14540) is a SEPARATE concern: post-router-topology
+#   that port is bound by mavlink-routerd as a Server endpoint, so
+#   MAVSDK opening udpin there will collide at the UDP layer. That
+#   will be addressed when --attack gps_spoofing is run end-to-end.
 ATTACK_FACTORIES: dict[str, Callable[[], AttackInjector]] = {
     "none": NullAttackInjector,
     "comm_disruption": CommDisruptionInjector,
     "command_injection": lambda: CommandInjectionInjector(port_base=14570),
-    "gps_spoofing": GpsSpoofingInjector,
+    "gps_spoofing": lambda: GpsSpoofingInjector(
+        runner=DefaultGpsSpoofingRunner(grpc_port=50057),
+    ),
 }
 
 

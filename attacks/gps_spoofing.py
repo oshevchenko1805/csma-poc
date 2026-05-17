@@ -91,21 +91,54 @@ class DefaultGpsSpoofingRunner(GpsSpoofingRunner):
     of overhead per operation (connect + handshake) which is acceptable
     for a PoC where the injector is called only at arm/fire/cleanup —
     three times per run, not a hot path.
+
+    gRPC port (step 10c)
+    --------------------
+    mavsdk.System(port=N) spawns a local mavsdk_server subprocess on
+    gRPC port N (default 50051). When the injector runs concurrently
+    with three MavsdkDroneControllers driving the mission (50051-50053)
+    and per-UAV loiter handlers (50054-50056), it needs its own gRPC
+    port to avoid `AioRpcError: Socket closed`. Pass `grpc_port=50057`
+    in the construction path from run_one.py; default `None` preserves
+    legacy `System()` for tests injecting FakeGpsSpoofingRunner.
+
+    Note on the UDP endpoint (separate concern, step-10c follow-up):
+    the injector currently constructs `udp://127.0.0.1:14540+i` as the
+    MAVSDK system address. Post-router-topology (step 10b) that port
+    is bound by mavlink-routerd as a UDP Server; MAVSDK opening
+    `udpin` on the same port will collide. This is a UDP-layer
+    problem, distinct from gRPC port collision, and will be addressed
+    when `--attack gps_spoofing` is run end-to-end against the live
+    PX4 SITL fleet.
     """
 
     DEFAULT_TIMEOUT_SEC: float = 5.0
 
-    def __init__(self, *, timeout_sec: float = DEFAULT_TIMEOUT_SEC) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_sec: float = DEFAULT_TIMEOUT_SEC,
+        grpc_port: Optional[int] = None,
+    ) -> None:
         if timeout_sec <= 0:
             raise ValueError("timeout_sec must be positive")
         self._timeout = timeout_sec
+        self._grpc_port = grpc_port
+
+    @property
+    def grpc_port(self) -> Optional[int]:
+        return self._grpc_port
 
     async def _connect(self, endpoint: str):
         import asyncio
 
         from mavsdk import System  # lazy
 
-        drone = System()
+        drone = (
+            System(port=self._grpc_port)
+            if self._grpc_port is not None
+            else System()
+        )
         await asyncio.wait_for(
             drone.connect(system_address=endpoint), timeout=self._timeout
         )

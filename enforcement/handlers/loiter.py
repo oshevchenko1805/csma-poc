@@ -63,14 +63,46 @@ class DefaultMavsdkRunner(MavsdkRunner):
     The lazy import keeps mavsdk off the dependency path of unit tests
     that inject a FakeMavsdkRunner — pytest doesn't have to install
     mavsdk just to test handler logic.
+
+    gRPC port (step 10c)
+    --------------------
+    mavsdk.System(port=N) spawns a local mavsdk_server subprocess on
+    gRPC port N (default 50051). When multiple MAVSDK consumers are
+    alive in the same process — three MavsdkDroneControllers driving
+    the mission on 50051-50053 plus a per-UAV ModeLoiterHandler firing
+    during recovery — each consumer needs its own gRPC port. Without
+    that, parallel Systems on the default 50051 collide with
+    `AioRpcError: Socket closed` (only the first bind wins; the
+    losers' gRPC channels are torn down silently and the recovery
+    handler reports success ~30 ms after request without actually
+    engaging hold mode — empirically observed in step 10c
+    command_injection smoke against arch C, where cross_check
+    recoveries on uav_2 looped because loiter never took effect).
+
+    Pass `grpc_port=50054+i` (one per UAV) at construction so each
+    per-UAV loiter handler runs its mavsdk_server on a distinct port.
+    Default `None` preserves legacy `System()` behaviour for callers
+    that don't need port isolation and for tests injecting
+    FakeMavsdkRunner.
     """
+
+    def __init__(self, *, grpc_port: Optional[int] = None) -> None:
+        self._grpc_port = grpc_port
+
+    @property
+    def grpc_port(self) -> Optional[int]:
+        return self._grpc_port
 
     async def set_loiter(self, endpoint: str, *, timeout_sec: float) -> None:
         import asyncio
 
         from mavsdk import System
 
-        drone = System()
+        drone = (
+            System(port=self._grpc_port)
+            if self._grpc_port is not None
+            else System()
+        )
         await asyncio.wait_for(
             drone.connect(system_address=endpoint), timeout=timeout_sec
         )
