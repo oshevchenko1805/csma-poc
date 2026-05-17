@@ -26,6 +26,19 @@ Design choices:
       STATUSTEXT.text) that would otherwise break json.dumps.
     - Connection injection (`_connection` kwarg) makes the listener
       unit-testable without a live MAVLink endpoint.
+
+Sysid-filter passthrough for COMMAND_LONG / COMMAND_INT:
+    The whole signature of a command-injection attack is a COMMAND_LONG
+    (or COMMAND_INT) arriving from a NON-whitelisted source system ID.
+    If the listener strictly enforced `src_sysid == expected_sysid` for
+    those types, the attacker's packets would be discarded BEFORE
+    reaching CommandInjectionDetector — leaving the detector blind to
+    its own attack class. To avoid that, COMMAND_LONG and COMMAND_INT
+    are passed through with any src_sysid; the CommandInjectionDetector
+    itself enforces the whitelist via its DEFAULT_WHITELIST. Other
+    message types (HEARTBEAT, GLOBAL_POSITION_INT, etc.) still require
+    matching expected_sysid — they carry no adversarial-source signal
+    and rogue-sourced copies would only confuse detectors.
 """
 
 from __future__ import annotations
@@ -58,6 +71,16 @@ DEFAULT_MSG_WHITELIST: frozenset[str] = frozenset(
         "SYS_STATUS",
         "STATUSTEXT",
     }
+)
+
+
+# Message types for which the listener's sysid filter is RELAXED — they
+# are forwarded to detectors regardless of src_sysid. The set must match
+# detectors.command.COMMAND_MSG_TYPES; we duplicate it here rather than
+# importing to keep core/ independent of detectors/. If you change one,
+# change the other.
+SYSID_FILTER_PASSTHROUGH: frozenset[str] = frozenset(
+    {"COMMAND_LONG", "COMMAND_INT"}
 )
 
 
@@ -112,6 +135,8 @@ class TelemetryListener:
     expected_sysid   Only messages whose src system ID matches will be
                      forwarded. PX4 SITL instance i has sysid i+1 by
                      default (instance 0 -> sysid 1).
+                     EXCEPTION: COMMAND_LONG/COMMAND_INT bypass this
+                     filter — see module docstring.
     uav_id           Logical UAV identifier used in the emitted events
                      (e.g. 'uav_0').
     source           Process identifier used as TelemetryEvent.source
@@ -248,7 +273,15 @@ class TelemetryListener:
                 src_sys = msg.get_srcSystem()
             except AttributeError:
                 src_sys = -1
-            if src_sys != self.expected_sysid:
+            # Sysid filter — but COMMAND_LONG / COMMAND_INT bypass it so
+            # that command-injection detection sees attacker packets
+            # (which by definition carry a non-whitelist src_sysid). The
+            # CommandInjectionDetector itself enforces the whitelist for
+            # those types.
+            if (
+                src_sys != self.expected_sysid
+                and msg_type not in SYSID_FILTER_PASSTHROUGH
+            ):
                 self._n_filtered_sysid += 1
                 continue
 
@@ -281,4 +314,3 @@ class TelemetryListener:
                 except Exception:
                     self._n_callback_errors += 1
                     # Swallow — same contract as ZmqMesh receiver.
-

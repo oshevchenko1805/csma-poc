@@ -189,6 +189,56 @@ class TestTelemetryListener:
         assert listener.stats["emitted"] == 1
         assert listener.stats["filtered_sysid"] == 2
 
+    def test_command_messages_pass_sysid_filter(self):
+        """COMMAND_LONG/COMMAND_INT bypass the listener's sysid filter so
+        command-injection attack packets (which by definition use a
+        non-whitelist src_sysid) reach the detector. Other message types
+        are still filtered strictly."""
+        conn = FakeConnection()
+        received: list[TelemetryEvent] = []
+
+        listener = TelemetryListener(
+            endpoint="x",
+            expected_sysid=1,
+            uav_id="uav_0",
+            source="m",
+            callback=received.append,
+            _connection=conn,
+            recv_timeout_sec=0.05,
+        )
+
+        with listener:
+            # Rogue sysid on a HEARTBEAT — filtered (control).
+            conn.push(FakeMessage("HEARTBEAT", 99, {}))
+            # Rogue sysid on COMMAND_LONG — passes through.
+            conn.push(
+                FakeMessage(
+                    "COMMAND_LONG",
+                    99,
+                    {"command": 192, "target_system": 1, "target_component": 1},
+                )
+            )
+            # Rogue sysid on COMMAND_INT — also passes through.
+            conn.push(
+                FakeMessage(
+                    "COMMAND_INT",
+                    77,
+                    {"command": 16, "target_system": 1, "target_component": 1},
+                )
+            )
+            assert _wait_until(lambda: len(received) == 2)
+
+        # HEARTBEAT was filtered, both COMMAND_* were emitted.
+        msg_types = sorted(ev.msg_type for ev in received)
+        assert msg_types == ["COMMAND_INT", "COMMAND_LONG"]
+        # Each carries the rogue _src_sysid for the detector to evaluate.
+        by_type = {ev.msg_type: ev for ev in received}
+        assert by_type["COMMAND_LONG"].data["_src_sysid"] == 99
+        assert by_type["COMMAND_INT"].data["_src_sysid"] == 77
+        # Stats reflect: HEARTBEAT filtered_sysid=1, two commands emitted.
+        assert listener.stats["filtered_sysid"] == 1
+        assert listener.stats["emitted"] == 2
+
     def test_default_whitelist_used_when_none(self):
         conn = FakeConnection()
         received: list[TelemetryEvent] = []

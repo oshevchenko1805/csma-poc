@@ -73,10 +73,28 @@ CONFIGS_DIR = REPO_ROOT / "configs"
 # ---------------------------------------------------------------------------
 
 
+# Per-trial attack injector factories.
+#
+# command_injection port_base note (step 10b post-router fix):
+#   Default CommandInjectionInjector.port_base=14540 targets PX4's port,
+#   which post-step-10b is bound by mavlink-routerd (Server endpoint).
+#   The router drops attacker packets because target_system=1 lives on
+#   the same Server endpoint the packet entered from (loop prevention) —
+#   so the Monitor listener at 14570+i never sees the spoofed
+#   COMMAND_LONG. Empirically: 'N messages to unknown endpoints in the
+#   last 5 seconds' in router log, monitor_uav_*.jsonl empty, no
+#   security events emitted.
+#
+#   Fix: route the injector straight at the Monitor listener (14570+i).
+#   This restores the step 10a attack model (attacker visible to the
+#   security agent's MAVLink listener; PX4 doesn't bind 14540 in
+#   step 10a either — it only sends there — so the flight is no less
+#   affected than in 10a). The class default remains 14540 so unit
+#   tests and any non-router-fronted scenarios are unaffected.
 ATTACK_FACTORIES: dict[str, Callable[[], AttackInjector]] = {
     "none": NullAttackInjector,
     "comm_disruption": CommDisruptionInjector,
-    "command_injection": CommandInjectionInjector,
+    "command_injection": lambda: CommandInjectionInjector(port_base=14570),
     "gps_spoofing": GpsSpoofingInjector,
 }
 

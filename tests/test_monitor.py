@@ -223,20 +223,19 @@ class TestTelemetryRouting:
         assert all(e.event_type != "security" for e in events)
 
     def test_command_injection_from_rogue_sysid_fires(self, tmp_path: Path):
-        """The detector reads _src_sysid from event.data; the listener
-        injects it. We push a message whose sysid does NOT match
-        expected_sysid (so it would be filtered) — but for this test we
-        actually need expected_sysid to MATCH while _src_sysid still
-        signals a rogue origin. We simulate that by having the listener
-        accept the message (sysid=1 matches expected) and the detector
-        treats the message's own srcSystem as legitimate. So this test
-        validates the FILTERING: a wrong-sysid message is dropped before
-        reaching the detector at all."""
+        """A COMMAND_LONG arriving with a non-whitelist src_sysid is the
+        signature of a command-injection attack. The listener bypasses
+        its sysid filter for COMMAND_LONG/COMMAND_INT (see
+        SYSID_FILTER_PASSTHROUGH in core/telemetry) so the detector can
+        see the packet. CommandInjectionDetector then fires because
+        src=99 is outside the {1,2,3,255} whitelist."""
         conn = FakeConnection()
         det = CommandInjectionDetector(target_uav="uav_0", source="monitor_uav_0")
+        log_path = tmp_path / "monitor.jsonl"
 
         with _make_monitor(tmp_path, detectors=[det], conn=conn) as m:
-            # Rogue sysid 99 — listener filters it out.
+            # Rogue sysid 99 — must NOT be filtered by the listener,
+            # must reach the detector, must produce a SecurityEvent.
             conn.push(
                 FakeMessage(
                     "COMMAND_LONG",
@@ -244,11 +243,17 @@ class TestTelemetryRouting:
                     {"command": 192, "target_system": 1, "target_component": 1},
                 )
             )
-            time.sleep(0.2)
+            assert _wait_until(lambda: m.stats["security_emitted"] >= 1)
 
-        # Filtered by listener (expected_sysid=1, message has sysid=99).
-        assert m.stats["listener_filtered_sysid"] == 1
-        assert m.stats["security_emitted"] == 0
+        # One security event emitted with the expected evidence.
+        events = read_jsonl(log_path)
+        sec = [e for e in events if e.event_type == "security"]
+        assert len(sec) == 1
+        assert isinstance(sec[0], SecurityEvent)
+        assert sec[0].detector == "command"
+        assert sec[0].target_uav == "uav_0"
+        assert sec[0].evidence["src_sysid"] == 99
+        assert sec[0].evidence["command_type"] == "COMMAND_LONG"
 
 
 # ---------------------------------------------------------------------------
