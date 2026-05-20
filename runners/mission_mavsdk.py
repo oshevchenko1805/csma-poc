@@ -30,6 +30,20 @@ spherical-earth approximation:
 This is accurate to ~0.1% for distances under 1 km, which matches
 our mission scale.
 
+Altitude convention (step 10d fix)
+----------------------------------
+MAVSDK's MissionItem takes `relative_altitude_m` — height above the
+home/takeoff point, NOT absolute MSL. Our internal MissionItem.alt
+field therefore carries the *relative* altitude (= the waypoint's
+alt_m offset above home), and upload_mission feeds it straight
+through. A previous version stored absolute MSL altitude here but
+hard-coded `relative_altitude_m=0.0` in the upload, which made every
+waypoint command "descend to home altitude". After takeoff to 15 m
+the drone would immediately try to descend to 0 m above home, trip
+mc_pos_control "invalid setpoints", and enter a Failsafe blind-land
+loop (observed in step 10d baseline on uav_0: chronic EKF horizontal
+residual + cross_check false positives downstream).
+
 PoC caveats (Chapter 4)
 -----------------------
 - Each call to MAVSDK is a fresh System() instance bound to one UDP
@@ -64,30 +78,37 @@ from runners.missions import MissionRunner
 
 @dataclass(frozen=True)
 class MissionItem:
-    """A GPS waypoint to feed MAVSDK MissionItem."""
+    """A GPS waypoint to feed MAVSDK MissionItem.
+
+    `relative_alt_m` is height ABOVE HOME (positive = up), matching
+    MAVSDK MissionItem.relative_altitude_m — NOT absolute MSL.
+    """
 
     lat: float
     lon: float
-    alt: float  # absolute altitude (m above mean sea level)
+    relative_alt_m: float  # height above home, m (positive = up)
 
 
 def ned_to_gps(
     *,
     home_lat: float,
     home_lon: float,
-    home_alt: float,
     north_m: float,
     east_m: float,
     alt_m: float,
 ) -> MissionItem:
-    """Convert NED offset to absolute GPS, small-distance approximation.
+    """Convert NED offset to a GPS lat/lon plus home-relative altitude.
 
     Accurate to ~0.1% for distances < 1 km.
 
     Inputs:
-      home_lat, home_lon (degrees), home_alt (m above MSL)
-      north_m, east_m  (offsets)
-      alt_m            (offset above home, positive = up)
+      home_lat, home_lon (degrees)
+      north_m, east_m  (offsets, m)
+      alt_m            (offset above home, m, positive = up)
+
+    The altitude is passed through unchanged as `relative_alt_m`
+    because MAVSDK wants height above home, not absolute MSL — so the
+    home altitude is not needed here.
     """
     # 1 degree lat ≈ 111,111 m at the equator and is essentially
     # constant. 1 degree lon shrinks toward the poles.
@@ -100,7 +121,7 @@ def ned_to_gps(
     return MissionItem(
         lat=home_lat + lat_offset,
         lon=home_lon + lon_offset,
-        alt=home_alt + alt_m,
+        relative_alt_m=alt_m,
     )
 
 
@@ -223,7 +244,7 @@ class MavsdkDroneController(DroneController):
             MItem(
                 latitude_deg=it.lat,
                 longitude_deg=it.lon,
-                relative_altitude_m=0.0,
+                relative_altitude_m=it.relative_alt_m,
                 speed_m_s=5.0,
                 is_fly_through=True,
                 gimbal_pitch_deg=0.0,
@@ -348,12 +369,14 @@ class MavsdkMissionRunner(MissionRunner):
 
         # Phase 3: convert NED → GPS per controller's home, upload, start
         async def _per_controller_setup(c: DroneController) -> None:
-            home_lat, home_lon, home_alt = await c.get_home_position()
+            # home_alt is unused for waypoint altitude (MAVSDK takes
+            # home-relative altitude), but get_home_position still
+            # returns it; we only need lat/lon for the NED→GPS conversion.
+            home_lat, home_lon, _home_alt = await c.get_home_position()
             items = [
                 ned_to_gps(
                     home_lat=home_lat,
                     home_lon=home_lon,
-                    home_alt=home_alt,
                     north_m=wp.north_m,
                     east_m=wp.east_m,
                     alt_m=wp.alt_m,

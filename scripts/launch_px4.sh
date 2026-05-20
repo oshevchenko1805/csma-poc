@@ -3,8 +3,22 @@
 #
 # Layout:
 #   inst 0  -> sysid 1, MAVLink port 14540, pose offset  (0,0,0)
-#   inst 1  -> sysid 2, MAVLink port 14541, pose offset  (2,0,0)
-#   inst 2  -> sysid 3, MAVLink port 14542, pose offset  (4,0,0)
+#   inst 1  -> sysid 2, MAVLink port 14541, pose offset  (5,0,0)
+#   inst 2  -> sysid 3, MAVLink port 14542, pose offset (10,0,0)
+#
+# Spacing rationale (step 10d): the original 2 m separation produced
+# downwash / physics-coupling interference during simultaneous takeoff
+# (asyncio.gather in MavsdkMissionRunner). Symptoms observed in step
+# 10c command_injection smoke run 2: uav_2 cross_check fires with
+# ~54 m/s lateral velocity (unphysical for X500); seconds later Gazebo
+# DART collision detector aborts (uav_0 log "Aborted (Signal sent by
+# tkill())"); uav_1 exits with "Preflight Fail: Attitude failure
+# (roll)". All three failures originate in the proximity-during-
+# takeoff envelope. 5 m gap (~10x model width) is safe for X500 in
+# default SITL physics. The matching constant in
+# runners/factory.py::_default_px4_pose must be kept in sync — it's
+# used by RestartProcessHandler to relaunch the same instance at the
+# same pose on recovery.
 #
 # Per-instance logs:    /tmp/px4_inst_{0,1,2}.log
 # PID file (for kill):  /tmp/px4_pids
@@ -77,10 +91,10 @@ launch_inst 0 "0,0,0,0,0,0"
 echo "  waiting 20s for Gazebo to come up..."
 sleep 20
  
-launch_inst 1 "2,0,0,0,0,0"
+launch_inst 1 "5,0,0,0,0,0"
 sleep 4
  
-launch_inst 2 "4,0,0,0,0,0"
+launch_inst 2 "10,0,0,0,0,0"
 sleep 4
  
 echo

@@ -165,8 +165,21 @@ def _build_detectors(
 
 
 def _default_px4_pose(instance: int) -> str:
-    """Spaced 2 m apart on +X axis, matching the original PoC layout."""
-    return f"{instance * 2},0,0,0,0,0"
+    """Spaced 5 m apart on +X axis. Must match scripts/launch_px4.sh.
+
+    Step 10d note: original 2 m spacing produced downwash / DART
+    physics-coupling during simultaneous takeoff (asyncio.gather in
+    MavsdkMissionRunner). Symptoms: unphysical lateral velocity on
+    one UAV (~54 m/s observed on uav_2 in step 10c run 2), followed
+    by DART collision-detector abort and PX4 attitude failures on
+    the other two. 5 m gap (~10x model width) is safe for X500
+    default SITL physics.
+
+    Used by RestartProcessHandler to relaunch a PX4 instance at the
+    same pose it had at initial launch — keep in lockstep with
+    launch_px4.sh's `launch_inst` calls.
+    """
+    return f"{instance * 5},0,0,0,0,0"
 
 
 def _default_process_spec(

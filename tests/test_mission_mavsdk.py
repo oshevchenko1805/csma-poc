@@ -127,16 +127,16 @@ def _make_runner(
 class TestNedToGps:
     def test_zero_offset(self):
         item = ned_to_gps(
-            home_lat=47.4, home_lon=8.5, home_alt=500.0,
+            home_lat=47.4, home_lon=8.5,
             north_m=0.0, east_m=0.0, alt_m=0.0,
         )
         assert item.lat == 47.4
         assert item.lon == 8.5
-        assert item.alt == 500.0
+        assert item.relative_alt_m == 0.0
 
     def test_north_offset(self):
         item = ned_to_gps(
-            home_lat=47.4, home_lon=8.5, home_alt=500.0,
+            home_lat=47.4, home_lon=8.5,
             north_m=111.111, east_m=0.0, alt_m=0.0,
         )
         # 111.111 m north ≈ 0.001 degree lat
@@ -146,17 +146,19 @@ class TestNedToGps:
     def test_east_offset_scaled_by_cos_lat(self):
         # At lat=0 (equator), 111.111 m east = 0.001 deg lon exactly.
         item = ned_to_gps(
-            home_lat=0.0, home_lon=0.0, home_alt=0.0,
+            home_lat=0.0, home_lon=0.0,
             north_m=0.0, east_m=111.111, alt_m=0.0,
         )
         assert abs(item.lon - 0.001) < 1e-5
 
     def test_alt_offset(self):
         item = ned_to_gps(
-            home_lat=47.4, home_lon=8.5, home_alt=500.0,
+            home_lat=47.4, home_lon=8.5,
             north_m=0.0, east_m=0.0, alt_m=20.0,
         )
-        assert item.alt == 520.0
+        # Altitude is now home-relative (passed through unchanged),
+        # NOT absolute MSL.
+        assert item.relative_alt_m == 20.0
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +257,8 @@ class TestStart:
             assert len(c.uploaded) == 1
             expected_lat = c.home[0] + 100.0 / 111_111.0
             assert abs(c.uploaded[0].lat - expected_lat) < 1e-6
+            # Altitude is home-relative: the waypoint's alt_m passed through.
+            assert c.uploaded[0].relative_alt_m == 10.0
 
     def test_double_start_raises(self):
         runner, _ = _make_runner(n_drones=1)
