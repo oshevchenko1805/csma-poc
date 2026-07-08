@@ -750,3 +750,65 @@ Root cause unconfirmed — likely a mavlink-routerd discovery/learning edge case
 | arch B × any                       | ⏸️ never run live |
 
 439 pytest tests passing. Repo on `main`, working tree clean (only untracked `runs/` directory with local SITL logs).
+---
+
+## Step 10e — IN PROGRESS (gps_spoofing, blocker A resolved)
+
+### Blocker A — RESOLVED via GZBridge source patch (variant 3)
+
+Decision: param-manipulation (SIM_GPS_NOISE / SIM_GPS_USED) rejected.
+- No noise-amplitude param exists in gz-sim; noise is hardcoded C++ (GZBridge
+  addGpsNoise, _pos_noise_amplitude=0.8). Only live param lever is SIM_GPS_USED<4,
+  which produces GNSS *denial* (fix loss → pos_h goes nan), NOT falsification.
+- Denial ≠ spoofing: thesis Table 3.3 separates them (T0856/T0832 integrity vs
+  T0826/T0814 availability). Collapsing spoofing→denial would gut the integrity
+  scenario and require rewriting 3.1.6.2 + tables 3.3/3.4 + injection case 1 +
+  waypoint section + Ch.5. Rejected.
+
+Chosen: **documented PX4 patch** — param-gated ramped GPS position offset in
+GZBridge, giving true residual-divergence (pos_horiz_ratio>1.0) spoofing signature.
+Preserves thesis verbatim; needs one honest line in Ch.4 ("PX4 with documented
+local GPS-offset injection patch"). Also dissolves blocker B (param written
+straight to PX4, no router fan-out).
+
+**Patch location:** `~/PX4-Autopilot/src/modules/simulation/gz_bridge/`
+- `parameters.c`: SIM_GPS_OFF_N (0.0), SIM_GPS_OFF_E (0.0), SIM_GPS_OFF_R (0.02 ramp)
+- `GZBridge.hpp`: ramp state (_gps_off_n/_gps_off_e) + 3 params in DEFINE_PARAMETERS tuple
+- `GZBridge.cpp` (~line 698, after altitude+=_gps_pos_noise_d): ramped offset applied
+  to latitude/longitude. Tag `OFFSET_INJECT` on all patched lines.
+- Built OK (make clean && make px4_sitl_default; incremental build hit the known
+  parameters.json.xz gen glitch → clean rebuild fixed it).
+
+**Status:** patch built, proven HARMLESS — arch-C baseline flies clean on it
+(error=null, security_emitted=0 all 3, is_armable OK ×3, full arm→takeoff).
+NOT YET committed (PX4 patch lives in separate repo; commit after in-flight verify).
+
+### NOT YET DONE (next session, in order)
+1. **In-flight injection unverified.** Offset effect confirmed only conceptually;
+   on-ground EKF does NOT fuse horizontal GPS (pos_h=nan, expected). Must inject
+   SIM_GPS_OFF_N mid-flight and confirm pos_horiz_ratio ramps >1.0.
+2. **Design fork before wiring:** how injector writes SIM_GPS_OFF_N — via router
+   (may resurface blocker B) vs straight param_set to PX4. Prefer direct.
+3. Wire into GpsSpoofingInjector + **mandatory restore phase** (set OFF_N=0 on
+   teardown — see storage lesson below).
+4. Live-verify gps_spoofing on arch C.
+
+### CRITICAL LESSON — per-instance param storage pollution
+Today's multi-hour rabbit hole root cause: PX4 SITL persists params to
+`build/px4_sitl_default/rootfs/{0,1,2}/parameters.bson` (PER-INSTANCE, not the
+rootfs-root file we first deleted). Diagnostic param_set probes (SIM_GPS_USED=0,
+SIM_GPS_OFF_N=40, SIM_GZ_EN_GPS denormalized) got saved and SURVIVED restarts,
+causing is_armable timeouts on some instances → TimeoutError in _wait_armable →
+whole gather() run failed. Fix: `rm rootfs/{0,1,2}/parameters*.bson` AFTER killing
+all procs, then relaunch.
+- Implication: injector MUST restore OFF_N=0, and runs should clean per-instance
+  param storage between trials, else offset leaks into next run's baseline.
+- Silver lining: per-instance storage is isolated → impact_scope=1 IS achievable
+  (offset on uav_0 won't auto-leak to peers at runtime).
+
+### Diagnostic markers added (uncommitted)
+`runners/mission_mavsdk.py`: 6 `[mission]` print markers around _wait_armable /
+set_takeoff_altitude / arm / takeoff. Made the timeout phase visible. Keep or
+strip next session.
+
+439 tests still passing (domain code untouched; only PX4 patch + debug prints).
