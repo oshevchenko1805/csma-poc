@@ -812,3 +812,101 @@ set_takeoff_altitude / arm / takeoff. Made the timeout phase visible. Keep or
 strip next session.
 
 439 tests still passing (domain code untouched; only PX4 patch + debug prints).
+Step 10e — MECHANISM VERIFIED IN FLIGHT (gps_spoofing)
+
+Status: GZBridge SIM_GPS_OFF_N offset injection produces a real,
+sustained ESTIMATOR_STATUS.pos_horiz_ratio > 1.0 on a FLYING drone.
+The GpsSpoofingDetector signature is confirmed to be reproducible live.
+Both open blockers for step 10e are now closed. Not yet wired into
+GpsSpoofingInjector; not yet run through run_one.py.
+
+Live result (standalone test, arch-agnostic, inst 0 only)
+
+Baseline hover (20 m): pos_h ≈ 0.005–0.008 (clean).
+After SIM_GPS_OFF_N=50:
+
+t after injectpos_horiz_ratiobaseline~0.006+0.5 s1.169+1.0 … +7.0 s2.000 (clipped)+8.0 s onward~0.004 (back to baseline)
+
+
+Detection fires at +1.5 s (3 sustained samples > 1.0 @ 2 Hz).
+On PX4's default 1 Hz stream this is ~3 s — matches the documented
+MTTD floor in detectors/gps.py.
+Ratio plateaus at 2.000 because PX4 clips the innovation test ratio
+at 2.0; the true residual is higher.
+SIM_GPS_OFF_N restored to 0.0 (verified readback). Per-instance
+param storage clean.
+
+
+Physics (honest note for Ch. 4 / Ch. 5)
+
+The detectable signature is the onset transient of the ramp, not a
+steady-state offset. SIM_GPS_OFF_R=0.02 ramps the offset to 50 m over
+~7 s; while the offset is changing, GPS diverges from the inertial
+prediction and the residual spikes (>1.0). Once the offset is static,
+EKF re-converges to the shifted position (it now "believes" it is 50 m
+north) and the residual falls back to baseline. This is physically
+faithful: real GNSS spoofing that walks a target off-course produces a
+growing residual only while the position is being pulled. sustained_ samples=3 catches the transient with margin. Implication for attack
+timing: the detection/observation window must overlap the ramp phase.
+For a longer detectable window, slow the ramp (lower SIM_GPS_OFF_R)
+or step the offset target repeatedly.
+
+Blocker resolutions (both closed)
+
+
+Blocker A (mechanism): RESOLVED earlier via GZBridge source patch
+(SIM_GPS_OFF_N/E/R, tag OFFSET_INJECT). Now verified to actually
+drive pos_horiz_ratio in flight, not just conceptually.
+Blocker B (param routing / wiring fork): CLOSED. The injector
+writes the param through the router, via the EXISTING MAVSDK
+fan-out endpoint (14560+i), using MAVSDK param.set_param_float.
+This is the same path proven by set_takeoff_altitude in 10b–10d.
+Blocker B was specifically about adding a 4th endpoint; reusing the
+existing 3-endpoint config does not reproduce it. No router config
+change needed. (Direct-to-PX4 path abandoned — unnecessary.)
+
+
+Test method (for reproduction)
+
+test_gps_offset_inflight_v2.py (repo root, uncommitted helper):
+
+
+Split channels through router on inst 0:
+PX4 14540 → router → 14560 (MAVSDK: fly + param) + 14570 (pymavlink: read ratio).
+MAVSDK does arm/takeoff/param (the proven path — passes PX4 prearm via
+is_armable wait). pymavlink reads ESTIMATOR_STATUS.pos_horiz_ratio
+on 14570 because mavsdk-python 3.15.3 has no mavlink_passthrough
+and cannot read that message itself.
+v1 (pure pymavlink) was abandoned: raw MAVLink arm hit
+"Arming denied: Resolve system health failures first" — it does not
+wait through prearm the way MAVSDK's is_armable does.
+
+
+Caution learned this session
+
+
+scripts/launch_px4.sh redirects PX4 stdout to /tmp/px4_inst_*.log.
+A stuck/looping instance can balloon this to tens of GB fast
+(hit 17 GB). Inspect with tail -c, never a full-file grep/tail -n
+on a multi-GB log. Truncate after kills: rm -f /tmp/px4_inst_*.log.
+pymavlink as a MAVLink peer must send its own GCS heartbeat or PX4
+reports datalink lost and refuses to arm (TEMPORARILY_REJECTED with
+no reason surfaced). Not needed in the MAVSDK path (it heartbeats).
+
+
+Next (one micro-step per turn)
+
+
+Wire the verified mechanism into GpsSpoofingInjector: MAVSDK
+param.set_param_float("SIM_GPS_OFF_N", offset) via the 14560 fan-out
+
+mandatory restore (OFF_N=0) in teardown. gRPC port 50057
+(already allocated) to stay clear of mission (50051–53) / loiter
+(50054–56).
+
+
+
+Live-verify gps_spoofing × arch C through run_one.py end-to-end
+(attack timing must land on the ramp window).
+Then: arch A + arch B baseline + one attack each (never run live).
+Step 11: 3×3 matrix smoke. Step 12: full experiment.
