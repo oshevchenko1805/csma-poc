@@ -910,3 +910,48 @@ Live-verify gps_spoofing × arch C through run_one.py end-to-end
 (attack timing must land on the ramp window).
 Then: arch A + arch B baseline + one attack each (never run live).
 Step 11: 3×3 matrix smoke. Step 12: full experiment.
+
+## Step 10e — gps_spoofing LIVE VERIFIED on arch C (ParamWriter path)
+
+**Result: PASS (detection + consensus). Recovery defect noted separately.**
+
+Run: `run_c_gps_spoofing_<ts>`, target uav_0, attack@90s, obs 60s.
+
+- Mechanism: injector no longer opens its own MAVSDK connection. During
+  flight the mission MAVSDK owns the target's UDP fan-out (14560+i);
+  a 2nd client can't bind, and raw pymavlink PARAM_SET doesn't route to
+  PX4 via the router. Verified exhaustively (see debugging arc below).
+- Final design: `AttackContext.param_writer` (ParamWriter Protocol in
+  attacks/base.py) provided by `MavsdkMissionRunner.param_writer_for()`
+  → `MissionParamWriter` delegates to the live controller borrowed via
+  `controller_for(uav_id)`. Wired with `MavsdkMissionRunner(uav_ids=...)`.
+- Teardown reordered in ExperimentRunner: attack.cleanup() runs BEFORE
+  mission.abort() so param restore uses the still-live connection.
+- Capture-on-fire (arm is before mission.start, no controller yet);
+  reads real baseline, falls back to restore_value/0.0 on read failure.
+
+**Live evidence (merged.jsonl):**
+- inject_start t0 → gps detector fired at +3.1s: pos_horiz_ratio=2.0
+  (PX4-clipped), threshold 1.0, sustained_samples=3. Onset-transient
+  signature as predicted (not steady state).
+- isolation_announce (gps_anomaly) by monitor_uav_0.
+- coordinator_uav_1 → recovery_request mode_loiter.
+- monitor_uav_1 AND monitor_uav_2 independently raised
+  cross_check_anomaly on uav_0 → full mesh consensus.
+- run_summary: error=null, handler_errors=0 across all components.
+
+**Open defect (NOT gps-related): mode_loiter recovery failed.**
+- recovery_ack action=mode_loiter success=false, error="loiter failed:".
+- Root: loiter handler uses `_default_mavsdk_endpoint` → `udp://127.0.0.1:14540`
+  (factory.py). Deprecated udp:// scheme + tries to attach a 2nd MAVSDK
+  server on the target during flight. Detection/isolation OK; recovery
+  execution is the next task.
+
+**Abandoned approaches (do NOT retry):**
+- 2nd mavsdk_server on udpin://14560 → bind "Address in use" (mission holds it).
+- Router TCP server endpoint (tcpout://5761) → set_param timeouts in full flight.
+- Raw pymavlink PARAM_SET to 14540/14570 → does not apply (router routing).
+- All three fail for the same reason: only the live mission System reaches
+  PX4 params mid-flight.
+
+**Test count: 446 passing.**

@@ -17,6 +17,17 @@ Architecture
   MavsdkDroneController (lazy mavsdk import); tests pass a factory
   returning FakeDroneController.
 
+Param access for attacks (step 10e)
+-----------------------------------
+During flight the mission controller owns the UDP fan-out port
+(14560+i); no second MAVSDK client can bind it. A param-writing attack
+(gps_spoofing) therefore cannot open its own connection mid-flight and
+must borrow the live mission connection. DroneController exposes
+`get_param_float` / `set_param_float`, and MavsdkMissionRunner offers
+`controller_for(uav_id)` so the experiment layer can hand the attack a
+ParamWriter backed by the already-connected controller. This keeps the
+single working param channel and avoids a second mavsdk_server.
+
 Coordinate frame
 ----------------
 Config waypoints are in local NED frame (north/east/down meters
@@ -72,6 +83,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from attacks.base import ParamWriter
 from core.config import Waypoint
 from runners.missions import MissionRunner
 
@@ -160,6 +172,16 @@ class DroneController(ABC):
     @abstractmethod
     async def disconnect(self) -> None: ...
 
+    # --- Optional param access (borrowed by param-writing attacks) ---
+    # Concrete (non-abstract) defaults so controllers that don't support
+    # param access — e.g. test fakes — still instantiate unchanged.
+    # MavsdkDroneController overrides both with real MAVSDK Param calls.
+    async def get_param_float(self, name: str) -> float:
+        raise NotImplementedError("param access not supported by this controller")
+
+    async def set_param_float(self, name: str, value: float) -> None:
+        raise NotImplementedError("param access not supported by this controller")
+
 
 class MavsdkDroneController(DroneController):
     """Real MAVSDK-driven controller. Lazy mavsdk import."""
@@ -210,7 +232,13 @@ class MavsdkDroneController(DroneController):
             async for h in self._drone.telemetry.health():
                 if h.is_armable:
                     return
-        await asyncio.wait_for(_wait_armable(), timeout=90.0)
+        print('[mission] waiting is_armable (GPS/EKF converge)...', flush=True)
+        try:
+            await asyncio.wait_for(_wait_armable(), timeout=90.0)
+        except asyncio.TimeoutError:
+            print('[mission] TIMEOUT in _wait_armable: is_armable never True (no position estimate)', flush=True)
+            raise
+        print('[mission] is_armable OK', flush=True)
 
     async def get_home_position(self) -> tuple[float, float, float]:
         assert self._drone is not None
@@ -221,13 +249,16 @@ class MavsdkDroneController(DroneController):
 
     async def arm_and_takeoff(self, *, altitude_m: float) -> None:
         assert self._drone is not None
+        print('[mission] set_takeoff_altitude...', flush=True)
         await asyncio.wait_for(
             self._drone.action.set_takeoff_altitude(altitude_m),
             timeout=self._action_timeout,
         )
+        print('[mission] arm...', flush=True)
         await asyncio.wait_for(
             self._drone.action.arm(), timeout=self._action_timeout
         )
+        print('[mission] takeoff...', flush=True)
         await asyncio.wait_for(
             self._drone.action.takeoff(), timeout=self._action_timeout
         )
@@ -297,6 +328,21 @@ class MavsdkDroneController(DroneController):
         # the System go out of scope is the convention.
         self._drone = None
 
+    # --- Param access (borrowed by gps_spoofing during flight) ---
+    async def get_param_float(self, name: str) -> float:
+        assert self._drone is not None
+        return await asyncio.wait_for(
+            self._drone.param.get_param_float(name),
+            timeout=self._action_timeout,
+        )
+
+    async def set_param_float(self, name: str, value: float) -> None:
+        assert self._drone is not None
+        await asyncio.wait_for(
+            self._drone.param.set_param_float(name, value),
+            timeout=self._action_timeout,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Mission runner
@@ -305,6 +351,32 @@ class MavsdkDroneController(DroneController):
 
 ControllerFactory = Callable[[str], DroneController]
 """(mavsdk_endpoint) -> DroneController instance."""
+
+
+class MissionParamWriter:
+    """ParamWriter backed by a live mission controller.
+
+    Resolves the target controller lazily on each call via
+    MavsdkMissionRunner.controller_for, so it can be handed to an attack
+    at arm() time (before the mission has started and controllers
+    exist) and used later at fire()/cleanup() when they do. Delegates
+    param ops to the controller's borrowed MAVSDK connection — the only
+    channel that reaches PX4 params while the mission holds the UDP
+    fan-out port. Satisfies the attacks.base.ParamWriter Protocol
+    structurally.
+    """
+
+    def __init__(self, runner: "MavsdkMissionRunner", uav_id: str) -> None:
+        self._runner = runner
+        self._uav_id = uav_id
+
+    async def get_param_float(self, name: str) -> float:
+        controller = self._runner.controller_for(self._uav_id)
+        return await controller.get_param_float(name)
+
+    async def set_param_float(self, name: str, value: float) -> None:
+        controller = self._runner.controller_for(self._uav_id)
+        await controller.set_param_float(name, value)
 
 
 class MavsdkMissionRunner(MissionRunner):
@@ -321,6 +393,7 @@ class MavsdkMissionRunner(MissionRunner):
         controller_factory: Optional[ControllerFactory] = None,
         takeoff_altitude_m: float = DEFAULT_TAKEOFF_ALT_M,
         poll_period_sec: float = DEFAULT_POLL_PERIOD_SEC,
+        uav_ids: Optional[list[str]] = None,
     ) -> None:
         if not endpoints:
             raise ValueError("endpoints must be non-empty")
@@ -330,6 +403,8 @@ class MavsdkMissionRunner(MissionRunner):
             raise ValueError("takeoff_altitude_m must be positive")
         if poll_period_sec <= 0:
             raise ValueError("poll_period_sec must be positive")
+        if uav_ids is not None and len(uav_ids) != len(endpoints):
+            raise ValueError("uav_ids must match endpoints length")
 
         self._endpoints = list(endpoints)
         self._waypoints = list(waypoints)
@@ -340,6 +415,12 @@ class MavsdkMissionRunner(MissionRunner):
         )
         self._takeoff_alt = takeoff_altitude_m
         self._poll_period = poll_period_sec
+        # Parallel to _endpoints: uav_ids[i] flies on endpoints[i]. Lets
+        # controller_for() resolve a controller by uav_id without relying
+        # on endpoint-string parsing. None = mapping not provided.
+        self._uav_ids: Optional[list[str]] = (
+            list(uav_ids) if uav_ids is not None else None
+        )
 
         self._controllers: list[DroneController] = []
         self._started: bool = False
@@ -347,6 +428,36 @@ class MavsdkMissionRunner(MissionRunner):
     @property
     def controllers(self) -> list[DroneController]:
         return list(self._controllers)
+
+    def controller_for(self, uav_id: str) -> DroneController:
+        """Return the live controller driving `uav_id`.
+
+        Requires uav_ids to have been supplied at construction and
+        start() to have built the controllers. Errors are explicit so a
+        wiring bug surfaces loudly instead of silently targeting the
+        wrong UAV.
+        """
+        if self._uav_ids is None:
+            raise RuntimeError(
+                "controller_for requires uav_ids to be set at construction"
+            )
+        if not self._controllers:
+            raise RuntimeError("controller_for called before start()")
+        try:
+            idx = self._uav_ids.index(uav_id)
+        except ValueError:
+            raise KeyError(f"unknown uav_id: {uav_id!r}")
+        return self._controllers[idx]
+
+    def param_writer_for(self, uav_id: str) -> Optional[ParamWriter]:
+        """Lend this UAV's live MAVSDK connection as a ParamWriter.
+
+        Returned eagerly (the writer resolves the controller lazily on
+        first use), so it can be created before start(). If uav_ids
+        wasn't supplied, the writer's first call raises a clear error
+        via controller_for rather than silently no-op'ing.
+        """
+        return MissionParamWriter(self, uav_id)
 
     async def start(self) -> None:
         """Connect all, takeoff, upload, start — fully in parallel."""

@@ -1,15 +1,19 @@
 """Attack injection modules.
 
 Three concrete attacks implementing the AttackInjector contract:
-
   - CommDisruptionInjector       (iptables DROP rule)
   - CommandInjectionInjector     (periodic MAVLink commands with spoofed sysid)
-  - GpsSpoofingInjector          (PX4 SITL param manipulation)
+  - GpsSpoofingInjector          (PX4 SITL param manipulation via ParamWriter)
 
 Plus NullAttackInjector for baseline runs.
 """
 
-from attacks.base import AttackContext, AttackInjector, NullAttackInjector
+from attacks.base import (
+    AttackContext,
+    AttackInjector,
+    NullAttackInjector,
+    ParamWriter,
+)
 from attacks.command_injection import (
     CommandInjectionInjector,
     MavlinkSender,
@@ -20,16 +24,13 @@ from attacks.comm_disruption import (
     IptablesRunner,
     SubprocessIptablesRunner,
 )
-from attacks.gps_spoofing import (
-    DefaultGpsSpoofingRunner,
-    GpsSpoofingInjector,
-    GpsSpoofingRunner,
-)
+from attacks.gps_spoofing import GpsSpoofingInjector
 
 __all__ = [
     "AttackContext",
     "AttackInjector",
     "NullAttackInjector",
+    "ParamWriter",
     "CommDisruptionInjector",
     "IptablesRunner",
     "SubprocessIptablesRunner",
@@ -37,6 +38,4 @@ __all__ = [
     "MavlinkSender",
     "PymavlinkSender",
     "GpsSpoofingInjector",
-    "GpsSpoofingRunner",
-    "DefaultGpsSpoofingRunner",
 ]

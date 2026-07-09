@@ -17,12 +17,22 @@ Lifecycle
 
 NullMissionRunner just sleeps for the configured mission.duration_sec
 so unit tests don't need PX4. A real MAVSDK runner is added in step 10.
+
+param_writer_for (step 10e)
+---------------------------
+Optional capability: a mission that holds a live connection to each UAV
+can lend it to a param-writing attack. Default returns None (no param
+channel); MavsdkMissionRunner overrides it. NullMissionRunner keeps the
+None default, so baseline / test runs simply have no ParamWriter.
 """
 
 from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from typing import Optional
+
+from attacks.base import ParamWriter
 
 
 class MissionRunner(ABC):
@@ -35,6 +45,12 @@ class MissionRunner(ABC):
 
     @abstractmethod
     async def abort(self) -> None: ...
+
+    def param_writer_for(self, uav_id: str) -> Optional[ParamWriter]:
+        """Return a ParamWriter targeting `uav_id`, or None if this
+        runner provides no param channel. Non-abstract with a None
+        default so only param-capable runners override it."""
+        return None
 
 
 class NullMissionRunner(MissionRunner):

@@ -11,8 +11,10 @@ from runners.mission_mavsdk import (
     DroneController,
     MavsdkMissionRunner,
     MissionItem,
+    MissionParamWriter,
     ned_to_gps,
 )
+from runners.missions import NullMissionRunner
 
 
 # ---------------------------------------------------------------------------
@@ -43,6 +45,8 @@ class FakeDroneController(DroneController):
         self.disconnected: bool = False
         self.rtl_called: bool = False
         self._mission_poll_count: int = 0
+        # PX4 param store for param-access tests.
+        self.params: dict[str, float] = {}
 
     def _maybe_raise(self, name: str) -> None:
         if self._raise_on == name:
@@ -83,6 +87,14 @@ class FakeDroneController(DroneController):
         self.calls.append("disconnect")
         self.disconnected = True
 
+    async def get_param_float(self, name):
+        self.calls.append("get_param")
+        return self.params.get(name, 0.0)
+
+    async def set_param_float(self, name, value):
+        self.calls.append("set_param")
+        self.params[name] = value
+
 
 def _wps() -> list[Waypoint]:
     return [
@@ -96,6 +108,7 @@ def _make_runner(
     n_drones: int = 3,
     factory_failure: str | None = None,
     complete_after: int = 1,
+    uav_ids: list[str] | None = None,
 ) -> tuple[MavsdkMissionRunner, list[FakeDroneController]]:
     created: list[FakeDroneController] = []
 
@@ -115,6 +128,7 @@ def _make_runner(
         waypoints=_wps(),
         controller_factory=factory,
         poll_period_sec=0.01,
+        uav_ids=uav_ids,
     )
     return runner, created
 
@@ -187,6 +201,14 @@ class TestConstruction:
         with pytest.raises(ValueError, match="poll_period_sec"):
             MavsdkMissionRunner(
                 endpoints=["x"], waypoints=_wps(), poll_period_sec=-1
+            )
+
+    def test_uav_ids_length_mismatch_rejected(self):
+        with pytest.raises(ValueError, match="uav_ids"):
+            MavsdkMissionRunner(
+                endpoints=["x:1", "x:2"],
+                waypoints=_wps(),
+                uav_ids=["uav_0"],  # only one, needs two
             )
 
 
@@ -380,3 +402,73 @@ class TestAbort:
         )
         # Must not raise even though nothing was started
         asyncio.run(runner.abort())
+
+
+# ---------------------------------------------------------------------------
+# controller_for — uav_id lookup (step 10e)
+# ---------------------------------------------------------------------------
+
+
+class TestControllerFor:
+    def test_resolves_controller_by_uav_id(self):
+        runner, created = _make_runner(
+            n_drones=3, uav_ids=["uav_0", "uav_1", "uav_2"]
+        )
+        asyncio.run(runner.start())
+        assert runner.controller_for("uav_1") is created[1]
+        assert runner.controller_for("uav_0") is created[0]
+
+    def test_without_uav_ids_raises(self):
+        runner, _ = _make_runner(n_drones=2)  # no uav_ids
+        asyncio.run(runner.start())
+        with pytest.raises(RuntimeError, match="uav_ids"):
+            runner.controller_for("uav_0")
+
+    def test_before_start_raises(self):
+        runner, _ = _make_runner(n_drones=2, uav_ids=["uav_0", "uav_1"])
+        with pytest.raises(RuntimeError, match="before start"):
+            runner.controller_for("uav_0")
+
+    def test_unknown_uav_id_raises(self):
+        runner, _ = _make_runner(n_drones=2, uav_ids=["uav_0", "uav_1"])
+        asyncio.run(runner.start())
+        with pytest.raises(KeyError):
+            runner.controller_for("uav_9")
+
+
+# ---------------------------------------------------------------------------
+# param_writer_for / MissionParamWriter (step 10e)
+# ---------------------------------------------------------------------------
+
+
+class TestParamWriter:
+    def test_param_writer_for_returns_writer(self):
+        runner, _ = _make_runner(n_drones=2, uav_ids=["uav_0", "uav_1"])
+        pw = runner.param_writer_for("uav_1")
+        assert isinstance(pw, MissionParamWriter)
+
+    def test_writer_set_then_get_roundtrips_to_controller(self):
+        runner, created = _make_runner(
+            n_drones=2, uav_ids=["uav_0", "uav_1"]
+        )
+        asyncio.run(runner.start())
+        pw = runner.param_writer_for("uav_1")
+
+        asyncio.run(pw.set_param_float("SIM_GPS_OFF_N", 50.0))
+        val = asyncio.run(pw.get_param_float("SIM_GPS_OFF_N"))
+        assert val == 50.0
+        # Written to the correct controller only (uav_1 = index 1).
+        assert created[1].params["SIM_GPS_OFF_N"] == 50.0
+        assert "SIM_GPS_OFF_N" not in created[0].params
+
+    def test_writer_resolves_controller_lazily(self):
+        """Writer can be created before start(); it only touches the
+        controller on first use."""
+        runner, _ = _make_runner(n_drones=1, uav_ids=["uav_0"])
+        pw = runner.param_writer_for("uav_0")  # before start()
+        asyncio.run(runner.start())
+        asyncio.run(pw.set_param_float("SIM_GPS_OFF_N", 7.0))
+        assert runner.controller_for("uav_0").params["SIM_GPS_OFF_N"] == 7.0
+
+    def test_null_mission_runner_has_no_param_writer(self):
+        assert NullMissionRunner(duration_sec=1.0).param_writer_for("uav_0") is None

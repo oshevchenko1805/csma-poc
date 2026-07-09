@@ -24,15 +24,19 @@ Lifecycle order (strict)
 ------------------------
 Setup:                                  Teardown (reverse):
   build_fleet                              merge_logs + summary
-  mesh.start()        × N                  monitor.stop()    × N
-  monitor.start()     × N                  coordinator.stop() × N
-  coordinator.start() × N                  mesh.stop()        × N
-                                           (handlers cleaned up below)
+  mesh.start()        × N                  attack.cleanup()
+  monitor.start()     × N                  mission.abort()
+  coordinator.start() × N                  monitor.stop()    × N
+                                           coordinator.stop() × N
+                                           mesh.stop()        × N
 
-The teardown order matters: stop monitors first so no new mesh
-publishes happen, then coordinators, then meshes. Reversing this can
-deadlock if a coordinator tries to publish a final ack into a
-mesh that's already stopped.
+Teardown order matters twice over:
+  - attack.cleanup() runs BEFORE mission.abort() so a param-restoring
+    attack (gps_spoofing) can still reach the target through the live
+    mission connection; abort() RTLs and disconnects it.
+  - then stop monitors first so no new mesh publishes happen, then
+    coordinators, then meshes. Reversing that can deadlock if a
+    coordinator tries to publish a final ack into a stopped mesh.
 """
 
 from __future__ import annotations
@@ -139,11 +143,20 @@ class ExperimentRunner:
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         finally:
-            # Cleanup MUST run even on failure.
+            # Cleanup MUST run even on failure. Order matters:
+            # (1) attack cleanup restores params via the still-live
+            #     mission connection;
+            # (2) mission abort RTLs and disconnects the UAVs;
+            # (3) fleet teardown stops monitors/coordinators/meshes.
             try:
                 await self._cleanup_attack()
             except Exception as exc:
                 error = error or f"cleanup_attack: {exc}"
+            try:
+                if self._mission_runner is not None:
+                    await self._mission_runner.abort()
+            except Exception as exc:
+                error = error or f"mission_abort: {exc}"
             try:
                 self._teardown_fleet()
             except Exception as exc:
@@ -192,10 +205,22 @@ class ExperimentRunner:
             e.sysid for e in self._exp_cfg.telemetry.endpoints
             if e.uav_id == target
         )
+        # A param-writing attack (gps_spoofing) needs to reach PX4 params
+        # while the target is flying. During flight the mission owns the
+        # only MAVSDK connection, so it lends one via param_writer_for.
+        # Resolved lazily by the writer at fire() time (controllers don't
+        # exist until mission.start()). None when the mission can't
+        # provide one (NullMissionRunner) — non-param attacks ignore it.
+        param_writer = (
+            self._mission_runner.param_writer_for(target)
+            if self._mission_runner is not None
+            else None
+        )
         ctx = AttackContext(
             target_uav=target,
             target_sysid=target_sysid,
             log_dir=self._fleet.log_dir,
+            param_writer=param_writer,
         )
         await self._attack_injector.arm(ctx)
 
@@ -216,10 +241,9 @@ class ExperimentRunner:
         # End-of-run marker
         self._emit_attack_event(target, phase="inject_end")
 
-        # If a mission is running, abort it (we've collected what we
-        # need). Real MAVSDK mission would do a safe RTL.
-        if self._mission_runner is not None:
-            await self._mission_runner.abort()
+        # NOTE: mission abort/RTL moved to _run_async's finally so it
+        # runs AFTER attack cleanup — gps_spoofing's param restore borrows
+        # the live mission connection, which abort() tears down.
 
     def _emit_attack_event(self, target: str, *, phase: str) -> None:
         if self._attack_logger is None:

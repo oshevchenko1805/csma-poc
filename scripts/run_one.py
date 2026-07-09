@@ -53,10 +53,7 @@ if str(REPO_ROOT) not in sys.path:
 from attacks.base import AttackInjector, NullAttackInjector  # noqa: E402
 from attacks.command_injection import CommandInjectionInjector  # noqa: E402
 from attacks.comm_disruption import CommDisruptionInjector  # noqa: E402
-from attacks.gps_spoofing import (  # noqa: E402
-    DefaultGpsSpoofingRunner,
-    GpsSpoofingInjector,
-)
+from attacks.gps_spoofing import GpsSpoofingInjector  # noqa: E402
 from core.config import (  # noqa: E402
     ExperimentConfig,
     load_architecture_config,
@@ -95,23 +92,23 @@ CONFIGS_DIR = REPO_ROOT / "configs"
 #   affected than in 10a). The class default remains 14540 so unit
 #   tests and any non-router-fronted scenarios are unaffected.
 #
-# gps_spoofing grpc_port note (step 10c):
-#   DefaultGpsSpoofingRunner uses mavsdk.System() which defaults to
-#   gRPC port 50051. Mission controllers (run_one.py build_mavsdk_mission)
-#   already hold 50051-50053, and the per-UAV loiter handlers
-#   (runners/factory.py LOITER_GRPC_PORT_BASE) hold 50054-50056. Pin
-#   the injector's runner to 50057 so its short-lived mavsdk_server
-#   subprocess doesn't collide. The injector's UDP endpoint
-#   (port_base=14540) is a SEPARATE concern: post-router-topology
-#   that port is bound by mavlink-routerd as a Server endpoint, so
-#   MAVSDK opening udpin there will collide at the UDP layer. That
-#   will be addressed when --attack gps_spoofing is run end-to-end.
+# gps_spoofing param channel note (step 10e):
+#   gps_spoofing sets SIM_GPS_OFF_N (GZBridge-patched horizontal offset)
+#   mid-flight. During flight the mission MAVSDK connection owns the UDP
+#   fan-out port (14560+i); a second MAVSDK client can't bind it, and raw
+#   pymavlink PARAM_SET doesn't route to PX4 through the router. So the
+#   injector doesn't open its own connection — ExperimentRunner hands it a
+#   ParamWriter backed by the live mission controller for the target UAV
+#   (see runners/mission_mavsdk.py::MissionParamWriter, wired here via
+#   MavsdkMissionRunner(uav_ids=...)). The injector construction below is
+#   therefore just the attack parameters; no endpoint / gRPC / transport.
 ATTACK_FACTORIES: dict[str, Callable[[], AttackInjector]] = {
     "none": NullAttackInjector,
     "comm_disruption": CommDisruptionInjector,
     "command_injection": lambda: CommandInjectionInjector(port_base=14570),
     "gps_spoofing": lambda: GpsSpoofingInjector(
-        runner=DefaultGpsSpoofingRunner(grpc_port=50057),
+        param_name="SIM_GPS_OFF_N",
+        spoofed_value=50.0,
     ),
 }
 
@@ -255,15 +252,20 @@ def build_mavsdk_mission(
     Verified empirically in step 10b parallel-probe.
 
     Ordered by sysid so endpoint[i] corresponds to UAV with sysid=i+1.
+    The parallel `uav_ids` list lets the runner resolve a controller by
+    uav_id (controller_for / param_writer_for) — required so gps_spoofing
+    can borrow the target UAV's live connection to write SIM_GPS_OFF_N.
     """
     from runners.mission_mavsdk import MavsdkDroneController
 
     endpoints: list[str] = []
+    uav_ids: list[str] = []
     endpoint_to_grpc: dict[str, int] = {}
     for ep in sorted(exp_cfg.telemetry.endpoints, key=lambda e: e.sysid):
         port = 14560 + (ep.sysid - 1)
         url = f"udpin://0.0.0.0:{port}"
         endpoints.append(url)
+        uav_ids.append(ep.uav_id)
         endpoint_to_grpc[url] = 50051 + (ep.sysid - 1)
 
     def factory(ep: str):
@@ -274,6 +276,7 @@ def build_mavsdk_mission(
         waypoints=list(exp_cfg.mission.waypoints),
         controller_factory=factory,
         takeoff_altitude_m=takeoff_altitude_m,
+        uav_ids=uav_ids,
     )
 
 

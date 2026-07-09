@@ -26,6 +26,16 @@ Why a class, not a function
   in the runner (try / finally).
 - An injector instance is single-use per run — instantiate fresh
   for each experiment run.
+
+ParamWriter seam (step 10e)
+---------------------------
+A param-writing attack (gps_spoofing) needs to set a PX4 param while
+the target is flying, but during flight the mission owns the only
+MAVSDK connection to that UAV (the UDP fan-out port is bound; a second
+client can't attach). So the attack does not open its own connection —
+the experiment layer hands it a `ParamWriter` in AttackContext, backed
+by the live mission controller. The attack layer only depends on this
+small Protocol; the mission layer provides the concrete implementation.
 """
 
 from __future__ import annotations
@@ -33,7 +43,20 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Protocol
+
+
+class ParamWriter(Protocol):
+    """Minimal PX4 param read/write capability an attack may need.
+
+    Implemented by the mission layer (backed by a live MAVSDK
+    connection) and passed to the attack via AttackContext. Structural
+    typing: anything with these two coroutines satisfies it.
+    """
+
+    async def get_param_float(self, name: str) -> float: ...
+
+    async def set_param_float(self, name: str, value: float) -> None: ...
 
 
 @dataclass
@@ -44,6 +67,10 @@ class AttackContext:
     target_sysid: int
     log_dir: Path
     extra: dict = field(default_factory=dict)
+    # Optional PX4 param channel for the target UAV. Present only when the
+    # mission runner can provide one (real MAVSDK flight); None otherwise
+    # (e.g. NullMissionRunner). Only param-writing attacks use it.
+    param_writer: Optional[ParamWriter] = None
 
 
 class AttackInjector(ABC):
@@ -90,3 +117,4 @@ class NullAttackInjector(AttackInjector):
 
     async def cleanup(self) -> None:
         return None
+

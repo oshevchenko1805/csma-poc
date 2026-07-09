@@ -43,12 +43,11 @@ parallel with the three mission controllers (which already use
 `AioRpcError: Socket closed` from gRPC bind collisions, each per-UAV
 ModeLoiterHandler is constructed with a DefaultMavsdkRunner pinned to
 LOITER_GRPC_PORT_BASE + (sysid - 1), i.e. 50054 / 50055 / 50056.
-The GPS-spoofing injector's runner is wired separately in
-run_one.py with grpc_port=50057. Layout:
+The GPS-spoofing injector borrows the mission controller connection
+via a ParamWriter (step 10e); it needs no gRPC port of its own. Layout:
 
     50051-50053  MavsdkDroneController (mission, one per UAV)
     50054-50056  DefaultMavsdkRunner   (loiter recovery, one per UAV)
-    50057        DefaultGpsSpoofingRunner (one-shot, per attack run)
 """
 
 from __future__ import annotations
