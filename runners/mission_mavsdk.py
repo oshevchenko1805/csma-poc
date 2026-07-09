@@ -85,6 +85,7 @@ from typing import Callable, Optional
 
 from attacks.base import ParamWriter
 from core.config import Waypoint
+from enforcement.handlers.loiter import MavsdkRunner
 from runners.missions import MissionRunner
 
 
@@ -181,6 +182,12 @@ class DroneController(ABC):
 
     async def set_param_float(self, name: str, value: float) -> None:
         raise NotImplementedError("param access not supported by this controller")
+
+    # --- Optional loiter/hold (borrowed by recovery via mission conn) ---
+    # Concrete default so controllers that don't support it (test fakes)
+    # still instantiate. MavsdkDroneController overrides with action.hold().
+    async def hold(self) -> None:
+        raise NotImplementedError("hold not supported by this controller")
 
 
 class MavsdkDroneController(DroneController):
@@ -343,6 +350,15 @@ class MavsdkDroneController(DroneController):
             timeout=self._action_timeout,
         )
 
+    async def hold(self) -> None:
+        # MAVSDK action.hold() == PX4 LOITER mode. Uses the live mission
+        # connection — the only channel that reaches the target in flight.
+        assert self._drone is not None
+        await asyncio.wait_for(
+            self._drone.action.hold(),
+            timeout=self._action_timeout,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Mission runner
@@ -377,6 +393,71 @@ class MissionParamWriter:
     async def set_param_float(self, name: str, value: float) -> None:
         controller = self._runner.controller_for(self._uav_id)
         await controller.set_param_float(name, value)
+
+
+class MissionLoiterRunner(MavsdkRunner):
+    """MavsdkRunner (loiter DI seam) backed by a live mission controller.
+
+    Symmetric to MissionParamWriter: instead of opening its own MAVSDK
+    System (which can't bind the target's port mid-flight), it borrows
+    the mission controller and issues action.hold() on it. The `endpoint`
+    argument of set_loiter is ignored — the controller already holds the
+    connection.
+
+    Cross-loop bridge (step 10e)
+    ----------------------------
+    The mission controller's MAVSDK System (and its gRPC channel) lives
+    in the main ExperimentRunner event loop. Recovery, however, is driven
+    from the Coordinator's mesh-receiver thread via a short-lived
+    `asyncio.run()` (see runners/coordinator.py) — a different loop and
+    thread. A gRPC future is bound to the loop that created the System, so
+    awaiting hold() directly from the recovery loop fails with
+    "attached to a different loop". We therefore schedule hold() back onto
+    the main loop with run_coroutine_threadsafe and block for the result.
+    This is the run_coroutine_threadsafe path anticipated in the
+    coordinator module docstring; the main loop is idle (awaiting the
+    observation-window sleep) during recovery, so it is free to run it.
+    """
+
+    DEFAULT_BRIDGE_TIMEOUT_SEC: float = 10.0
+
+    def __init__(
+        self,
+        runner: "MavsdkMissionRunner",
+        uav_id: str,
+        *,
+        main_loop=None,
+        bridge_timeout_sec: float = DEFAULT_BRIDGE_TIMEOUT_SEC,
+    ) -> None:
+        self._runner = runner
+        self._uav_id = uav_id
+        self._main_loop = main_loop
+        self._bridge_timeout = bridge_timeout_sec
+
+    async def set_loiter(self, endpoint: str, *, timeout_sec: float) -> None:
+        controller = self._runner.controller_for(self._uav_id)
+
+        try:
+            current = asyncio.get_running_loop()
+        except RuntimeError:
+            current = None
+
+        # Same loop as the mission connection (or no main loop captured):
+        # await directly.
+        if self._main_loop is None or current is self._main_loop:
+            await controller.hold()
+            return
+
+        # Different loop/thread: schedule hold() on the main loop where the
+        # MAVSDK System lives, and block this recovery loop until it's done.
+        future = asyncio.run_coroutine_threadsafe(
+            controller.hold(), self._main_loop
+        )
+        # future.result() is blocking; run it off the recovery loop so we
+        # don't stall it, and honour a timeout so recovery can't hang.
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: future.result(timeout=self._bridge_timeout)
+        )
 
 
 class MavsdkMissionRunner(MissionRunner):
@@ -458,6 +539,16 @@ class MavsdkMissionRunner(MissionRunner):
         via controller_for rather than silently no-op'ing.
         """
         return MissionParamWriter(self, uav_id)
+
+    def loiter_runner_for(self, uav_id: str, *, main_loop=None) -> MavsdkRunner:
+        """Lend this UAV's live connection as a loiter MavsdkRunner.
+
+        `main_loop` is the event loop that owns the mission MAVSDK
+        connection; when recovery calls set_loiter from another loop/
+        thread, the runner bridges hold() back onto it. Same lazy-resolve
+        contract as param_writer_for.
+        """
+        return MissionLoiterRunner(self, uav_id, main_loop=main_loop)
 
     async def start(self) -> None:
         """Connect all, takeoff, upload, start — fully in parallel."""

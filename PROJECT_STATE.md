@@ -1033,3 +1033,50 @@ Root cause unconfirmed — likely a mavlink-routerd discovery/learning edge case
 | arch B × any                       | ⏸️ never run live |
 
 439 pytest tests passing. Repo on `main`, working tree clean (only untracked `runs/` directory with local SITL logs).
+
+## Step 10e — loiter recovery LIVE VERIFIED on arch C (mission-borrowed connection)
+
+**Result: PASS. Full arch C chain closed end-to-end.**
+
+Run: run_c_gps_spoofing (target uav_0, attack@90s, obs 60s).
+
+Chain (merged.jsonl):
+  gps detect (pos_horiz_ratio=2.0, +~3s)
+  -> isolation_announce (gps_anomaly, monitor_uav_0)
+  -> cross_check_anomaly consensus (monitor_uav_1 + monitor_uav_2)
+  -> recovery_request mode_loiter (coordinator_uav_1)
+  -> recovery_ack mode_loiter success=true (enforcer_uav_0)   <-- NEW
+
+Design:
+- Loiter recovery no longer opens its own MAVSDK System (can't bind the
+  target's port mid-flight — same constraint as gps param injection).
+- DroneController.hold() + MavsdkMissionRunner.loiter_runner_for(uav, main_loop)
+  -> MissionLoiterRunner borrows the live mission controller.
+- ModeLoiterHandler.set_runner() swaps the default DefaultMavsdkRunner for
+  the mission-backed one; wired in ExperimentRunner._setup_fleet.
+- WiredFleet.loiter_handlers exposes handlers so the experiment layer can
+  swap their runner.
+
+Cross-loop bridge (the crux):
+- Recovery runs from the Coordinator mesh-receiver thread via a short-lived
+  asyncio.run() (coordinator.py:337) -> different loop/thread from the one
+  owning the mission MAVSDK System. Direct await -> "attached to a
+  different loop".
+- Fix: MissionLoiterRunner.set_loiter uses run_coroutine_threadsafe to
+  schedule hold() back onto the captured main loop (idle in the obs-window
+  sleep during recovery) and blocks for the result with a timeout.
+
+TECH DEBT (document in Ch.4, PoC simplification — NOT a hidden hack):
+- Coordinator still executes each recovery via per-request asyncio.run()
+  (coordinator.py:43-49, 337). We bridge over it rather than refactoring to
+  a long-lived recovery loop in a dedicated thread. The docstring already
+  flags this as the intended future refactor. Acceptable for PoC; the
+  bridge is the standard run_coroutine_threadsafe pattern.
+- DroneController.get_param_float/set_param_float/hold are concrete
+  NotImplementedError defaults (not a separate capability interface) so
+  test fakes instantiate unchanged. Minor; could be split into
+  ParamCapable/LoiterCapable interfaces later.
+- factory._default_mavsdk_endpoint (udp://14540) is now dead for loiter
+  (mission-backed) — remove in cleanup.
+
+**Test count: 446 passing.**

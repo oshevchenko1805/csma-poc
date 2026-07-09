@@ -191,6 +191,31 @@ class ExperimentRunner:
         for coord in self._fleet.coordinators:
             coord.start()
 
+        # Swap each loiter handler's MAVSDK runner for one backed by the
+        # live mission connection. During flight the mission owns the only
+        # connection to each UAV; a loiter handler opening its own MAVSDK
+        # System can't bind the port (step 10e). Only applies when the
+        # mission can lend a connection (real MAVSDK flight); Null/other
+        # missions are left with their default runner.
+        if self._mission_runner is not None and hasattr(
+            self._mission_runner, "loiter_runner_for"
+        ):
+            # Capture the main event loop that owns the mission MAVSDK
+            # connections. Recovery runs hold() from the mesh-receiver
+            # thread's short-lived loop; the loiter runner bridges it back
+            # onto this loop via run_coroutine_threadsafe.
+            try:
+                main_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                main_loop = None
+            for handler in self._fleet.loiter_handlers:
+                for uav_id in handler.supported_uavs:
+                    handler.set_runner(
+                        self._mission_runner.loiter_runner_for(
+                            uav_id, main_loop=main_loop
+                        )
+                    )
+
         self._start_wall = time.time()
 
     # ----- scenario -----

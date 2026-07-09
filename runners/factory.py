@@ -121,6 +121,10 @@ class WiredFleet:
     log_dir: Path
     # Cleanup handles (Architecture C only).
     filter_handlers: list[FilterCommandsHandler] = field(default_factory=list)
+    # Loiter recovery handlers (Architecture C only). Exposed so the
+    # experiment layer can swap each one's MAVSDK runner for a
+    # mission-backed one (borrows the live flight connection).
+    loiter_handlers: list[ModeLoiterHandler] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +391,7 @@ def _build_arch_c(
     coordinators: list[Coordinator] = []
     meshes: list[MeshBus] = []
     filter_handlers: list[FilterCommandsHandler] = []
+    loiter_handlers: list[ModeLoiterHandler] = []
 
     for spec in arch_cfg.monitors:
         # In Architecture C every monitor entry has location == its own
@@ -468,6 +473,7 @@ def _build_arch_c(
         )
         filter_handler = FilterCommandsHandler()
         filter_handlers.append(filter_handler)
+        loiter_handlers.append(loiter_handler)
 
         executor = RecoveryExecutor(
             source=f"enforcer_{uav_id}",
@@ -513,4 +519,5 @@ def _build_arch_c(
         meshes=meshes,
         log_dir=log_dir,
         filter_handlers=filter_handlers,
+        loiter_handlers=loiter_handlers,
     )

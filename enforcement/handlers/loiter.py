@@ -141,6 +141,17 @@ class ModeLoiterHandler(ActionHandler):
     def runner(self) -> MavsdkRunner:
         return self._runner
 
+    def set_runner(self, runner: MavsdkRunner) -> None:
+        """Replace the MAVSDK runner after construction.
+
+        Used by ExperimentRunner to swap the default (own-connection)
+        runner for a mission-backed one that borrows the live flight
+        connection — the only channel that reaches the target UAV
+        mid-flight. Optional: if never called, the constructor default
+        stands and behaviour is unchanged.
+        """
+        self._runner = runner
+
     @property
     def supported_uavs(self) -> frozenset[str]:
         return frozenset(self._endpoints.keys())
