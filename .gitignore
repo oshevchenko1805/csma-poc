@@ -48,3 +48,7 @@ desktop.ini
 .env
 .env.local
 local_config.yaml
+runs/
+test_gps_offset_inflight*.py
+/tmp/
+*.bson
