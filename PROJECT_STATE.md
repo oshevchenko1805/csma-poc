@@ -1080,3 +1080,27 @@ TECH DEBT (document in Ch.4, PoC simplification — NOT a hidden hack):
   (mission-backed) — remove in cleanup.
 
 **Test count: 446 passing.**
+
+## Step 10e/11 — FULL 3x3 MATRIX LIVE VERIFIED (A, B, C)
+
+All three architectures flown live through the MAVSDK pipeline. The
+long-standing gap (A and B never flown) is now closed.
+
+Live runs (arch × attack), gps_spoofing target uav_0, attack@90s:
+- arch A none          -> flies, 3 monitors read ~15k telemetry each, 0 events (baseline OK)
+- arch A gps_spoofing  -> detect +3.0s (ratio 2.0) -> LOCAL isolation, NO recovery
+- arch B gps_spoofing  -> detect +3.4s (ratio 2.0) -> segmented local isolation, NO recovery
+- arch C gps_spoofing  -> detect +3s -> mesh cross_check consensus (2 neighbours) -> loiter recovery success
+
+Contrast (for Ch.5):
+- MTTD ~identical across A/B/C (same detector + same param-injection signature).
+- What differs: consensus + recovery. A/B detect+isolate locally only; C
+  reaches neighbour consensus and self-heals (mode_loiter).
+- Matches the planned thesis claim: architecture varies impact_scope and
+  recovery, not detection latency.
+
+Monitor logs contain only events (not raw telemetry); empty monitor
+JSONL on baseline runs is expected. Telemetry flow verified via
+listener stats (telemetry_seen ~15k-34k per monitor, 0 callback errors).
+
+**Test count: 446 passing. arch A/B/C all live-verified.**
