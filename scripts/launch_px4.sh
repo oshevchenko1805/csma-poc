@@ -72,8 +72,19 @@ rm -rf "$HOME/.gz/log/"* 2>/dev/null || true
 launch_inst() {
     local inst=$1
     local pose=$2
-    local logfile="$LOG_DIR/px4_inst_${inst}.log"
-    echo "  launching instance $inst (pose=$pose) -> log: $logfile"
+    # PX4 stdout is pure debug noise (2-3 GB/run, tens of GB if an
+    # instance loops) and is never used for results — those live in
+    # runs/*/merged.jsonl. Discard it by default to keep the VM disk
+    # safe across long experiment batches (step 12). Set PX4_LOG=1 to
+    # capture it to /tmp/px4_inst_N.log for one-off debugging.
+    local logfile
+    if [[ "${PX4_LOG:-0}" == "1" ]]; then
+        logfile="$LOG_DIR/px4_inst_${inst}.log"
+        echo "  launching instance $inst (pose=$pose) -> log: $logfile"
+    else
+        logfile="/dev/null"
+        echo "  launching instance $inst (pose=$pose) -> log: discarded (PX4_LOG=1 to keep)"
+    fi
     env \
         PX4_SYS_AUTOSTART=4001 \
         PX4_GZ_MODEL=x500 \
@@ -101,4 +112,4 @@ echo
 echo "PIDs: $(cat "$PID_FILE" | tr '\n' ' ')"
 echo "Wait another ~10s for full boot, then verify with:"
 echo "  ss -ulnp 2>/dev/null | grep -E '1454[012]'"
-echo "  tail -2 /tmp/px4_inst_*.log"
+echo "  tail -2 /tmp/px4_inst_*.log   # only if PX4_LOG=1"
