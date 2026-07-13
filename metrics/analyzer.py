@@ -18,6 +18,19 @@ Metric definitions
   decision + action + stabilization) phases. The raw MTTR computed
   here is the wall-clock recovery latency from isolation onwards.
 
+- **Recovery status** (per run) ∈ {success, failed, not_applicable}
+  Distinguishes three genuinely different outcomes that must NOT be
+  collapsed in the Chapter 5 comparison:
+    * not_applicable — the run's architecture/policy never requested a
+      recovery for the target (e.g. arch A/B local-isolation-only, or
+      baseline). MTTR=None here is EXPECTED, not a failure.
+    * failed — a recovery WAS requested (recovery_request present) but
+      no successful RecoveryAck arrived. This is a real negative result.
+    * success — a successful RecoveryAck arrived for the target.
+  Collapsing failed and not_applicable into a single "no MTTR" hides the
+  architectural contrast (arch C recovers; A/B by design do not), so the
+  aggregate reports recovery_success_rate over APPLICABLE runs only.
+
 - **Impact scope**
   = number of distinct UAVs that emitted at least one SecurityEvent
   during the run. For attack runs the legitimate count is 1 (the
@@ -63,6 +76,15 @@ from core.logger import read_jsonl
 
 
 # ---------------------------------------------------------------------------
+# Recovery-status constants
+# ---------------------------------------------------------------------------
+
+RECOVERY_SUCCESS = "success"
+RECOVERY_FAILED = "failed"
+RECOVERY_NOT_APPLICABLE = "not_applicable"
+
+
+# ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
 
@@ -83,6 +105,16 @@ class RunMetrics:
     """At least one SecurityEvent targeting attack's target_uav."""
 
     recovery_success: bool = False
+    """Kept for backward compatibility. True iff recovery_status == success."""
+
+    recovery_status: str = RECOVERY_NOT_APPLICABLE
+    """One of {success, failed, not_applicable}. See module docstring.
+
+    - not_applicable: no recovery_request was ever issued for the target
+      (baseline, or arch A/B local-isolation-only). MTTR=None is expected.
+    - failed: a recovery_request WAS issued but no successful ack arrived.
+    - success: a successful RecoveryAck arrived for the target.
+    """
 
     impact_scope: int = 0
     """Number of distinct UAVs with at least one SecurityEvent."""
@@ -122,7 +154,21 @@ class AggregateMetrics:
     """Fraction of runs where attack was detected. NaN-safe: 0 if no runs."""
 
     recovery_rate: float = 0.0
-    """Fraction of attack runs with a successful recovery."""
+    """LEGACY: fraction of ALL runs in this cell with a successful recovery.
+    Kept for backward compatibility. Prefer recovery_success_rate, which is
+    computed over APPLICABLE runs only and does not penalise architectures
+    that (by design) never attempt recovery."""
+
+    recovery_success_rate: Optional[float] = None
+    """Fraction of APPLICABLE runs (recovery_status in {success, failed})
+    that succeeded. None when no run in this cell attempted recovery — that
+    is the honest signal for arch A/B / baseline cells."""
+
+    n_recovery_applicable: int = 0
+    """Runs where a recovery was requested (status success or failed)."""
+
+    n_recovery_success: int = 0
+    n_recovery_failed: int = 0
 
     avg_impact_scope: float = 0.0
 
@@ -216,6 +262,9 @@ def compute_run_metrics(
     security_events = [e for e in events if isinstance(e, SecurityEvent)]
     isolations = [e for e in events if isinstance(e, IsolationAnnounce)]
     recoveries = [e for e in events if isinstance(e, RecoveryAck)]
+    recovery_requests = [
+        e for e in events if getattr(e, "event_type", None) == "recovery_request"
+    ]
     attacks_inject_start = [
         e
         for e in events
@@ -233,9 +282,7 @@ def compute_run_metrics(
         affected_uavs=affected,
         n_security_events=len(security_events),
         n_isolations=len(isolations),
-        n_recovery_requests=sum(
-            1 for e in events if e.event_type == "recovery_request"
-        ),
+        n_recovery_requests=len(recovery_requests),
         n_recovery_acks=len(recoveries),
     )
 
@@ -270,7 +317,30 @@ def compute_run_metrics(
             if matching_ack:
                 first_ack = min(matching_ack, key=lambda r: r.timestamp)
                 metrics.mttr_sec = max(0.0, first_ack.timestamp - iso_t)
-                metrics.recovery_success = True
+
+    # Recovery status (three-state) — independent of the isolation anchor
+    # used for MTTR. A successful ack means success regardless of whether an
+    # isolation was announced; a request without a successful ack is a real
+    # failure; no request at all is "not applicable" (by-design for arch A/B
+    # local isolation, and for baseline).
+    if target_uav:
+        req_for_target = [
+            e
+            for e in recovery_requests
+            if getattr(e, "target_uav", None) == target_uav
+        ]
+        success_ack = any(
+            r.target_uav == target_uav and r.success for r in recoveries
+        )
+        if success_ack:
+            metrics.recovery_status = RECOVERY_SUCCESS
+            metrics.recovery_success = True
+        elif req_for_target:
+            metrics.recovery_status = RECOVERY_FAILED
+        else:
+            metrics.recovery_status = RECOVERY_NOT_APPLICABLE
+    else:
+        metrics.recovery_status = RECOVERY_NOT_APPLICABLE
 
     # False positive detection.
     if attack_type == "none":
@@ -350,6 +420,22 @@ def _aggregate_group(
         agg.detection_rate = sum(1 for r in runs if r.detected) / n
         agg.recovery_rate = sum(1 for r in runs if r.recovery_success) / n
         agg.avg_impact_scope = sum(r.impact_scope for r in runs) / n
+
+    # Three-state recovery aggregation. recovery_success_rate is over
+    # APPLICABLE runs only (status in {success, failed}); it stays None for
+    # cells where nothing ever attempted recovery (arch A/B, baseline) so the
+    # table shows "—" rather than a misleading 0%.
+    agg.n_recovery_success = sum(
+        1 for r in runs if r.recovery_status == RECOVERY_SUCCESS
+    )
+    agg.n_recovery_failed = sum(
+        1 for r in runs if r.recovery_status == RECOVERY_FAILED
+    )
+    agg.n_recovery_applicable = agg.n_recovery_success + agg.n_recovery_failed
+    if agg.n_recovery_applicable > 0:
+        agg.recovery_success_rate = (
+            agg.n_recovery_success / agg.n_recovery_applicable
+        )
 
     if attack_type == "none":
         # Baseline cell — compute FP rate
