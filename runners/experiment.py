@@ -131,7 +131,24 @@ class ExperimentRunner:
 
     def run(self) -> RunResult:
         """Synchronous wrapper. Drives the full lifecycle."""
-        return asyncio.run(self._run_async())
+        loop = asyncio.new_event_loop()
+
+        def _swallow_closed_loop(lp, context):
+            exc = context.get("exception")
+            if isinstance(exc, RuntimeError) and "Event loop is closed" in str(exc):
+                return
+            lp.default_exception_handler(context)
+
+        loop.set_exception_handler(_swallow_closed_loop)
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(self._run_async())
+            loop.run_until_complete(asyncio.sleep(0.25))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            return result
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
 
     # ----- internal: full lifecycle -----
 
