@@ -342,6 +342,7 @@ def _build_arch_ab(
                 log_path=log_dir / f"{source}.jsonl",
                 isolation_decider=decider,
                 isolation_enforcer=enforcer,
+                failure_domain=spec.location,
                 _telemetry_connection=connection,
             )
             monitors.append(mon)
@@ -441,6 +442,7 @@ def _build_arch_c(
             log_path=log_dir / f"{source}.jsonl",
             isolation_decider=decider,
             isolation_enforcer=enforcer,
+            failure_domain=spec.location,
             mesh=mesh,
             cross_check=cross_check,
             _telemetry_connection=connection,

@@ -115,6 +115,7 @@ class Monitor:
         tick_period_sec: float = DEFAULT_TICK_PERIOD_SEC,
         peer_publish_period_sec: float = DEFAULT_PEER_PUBLISH_PERIOD_SEC,
         log_telemetry: bool = False,
+        failure_domain: str = "",
         recv_timeout_sec: float = DEFAULT_RECV_TIMEOUT_SEC,
         _telemetry_connection=None,  # test hook
     ) -> None:
@@ -148,6 +149,7 @@ class Monitor:
 
         self._uav_id = uav_id
         self._source = source
+        self._failure_domain = failure_domain or uav_id
         self._tick_period = tick_period_sec
         self._peer_publish_period = peer_publish_period_sec
         self._log_telemetry = log_telemetry
@@ -268,6 +270,10 @@ class Monitor:
     @property
     def uav_id(self) -> str:
         return self._uav_id
+
+    @property
+    def failure_domain(self) -> str:
+        return self._failure_domain
 
     @property
     def isolation_decider(self) -> Optional[IsolationDecider]:
