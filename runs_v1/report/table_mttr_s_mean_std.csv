@@ -1,0 +1,4 @@
+Attack,A,B,C
+GPS spoofing,n/a,n/a,0.017±0.003 (10)
+Comm disruption,n/a,n/a,8.062±0.004 (10)
+Command injection,n/a,n/a,0.001±0.000 (10)
