@@ -240,6 +240,25 @@ class Monitor:
         self._logger.close()
         self._started = False
 
+    def disable_local_detectors(self) -> None:
+        """Silence this monitor's local, telemetry-driven detectors while
+        leaving the monitor otherwise alive (listener, tick, peer-position
+        publishing and mesh cross-check all keep running).
+
+        Models a threat where an adversary compromises node-local
+        intrusion detection on a UAV, yet the UAV keeps broadcasting its
+        telemetry/position (it must, to hold formation). Used by the
+        detector_takeout attack. Idempotent.
+
+        After this call feed()/tick() over the local detectors are
+        no-ops, so the monitor emits no SecurityEvents from its own
+        telemetry. In Architecture C neighbours can still catch this UAV
+        via cross_check on the still-published peer positions; in A/B
+        there is no such second opinion.
+        """
+        with self._detector_lock:
+            self._detectors = []
+
     def __enter__(self) -> "Monitor":
         self.start()
         return self

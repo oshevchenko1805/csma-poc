@@ -54,6 +54,8 @@ from attacks.base import AttackInjector, NullAttackInjector  # noqa: E402
 from attacks.command_injection import CommandInjectionInjector  # noqa: E402
 from attacks.comm_disruption import CommDisruptionInjector  # noqa: E402
 from attacks.gps_spoofing import GpsSpoofingInjector  # noqa: E402
+from attacks.detector_takeout import DetectorTakeoutInjector  # noqa: E402
+from attacks.composite import SequentialAttackInjector  # noqa: E402
 from core.config import (  # noqa: E402
     ExperimentConfig,
     load_architecture_config,
@@ -109,6 +111,23 @@ ATTACK_FACTORIES: dict[str, Callable[[], AttackInjector]] = {
     "gps_spoofing": lambda: GpsSpoofingInjector(
         param_name="SIM_GPS_OFF_N",
         spoofed_value=50.0,
+    ),
+    # detector_takeout scenario (mesh-advantage / C-resilience test):
+    #   phase 1 — silence the target monitor's local detectors (the
+    #             monitor stays alive and keeps publishing its position
+    #             to the mesh);
+    #   phase 2 — apply the GPS spoof.
+    # In A/B the target is now undetected (no mesh second opinion); in C
+    # neighbours catch it via cross_check on the still-published position.
+    # See attacks/detector_takeout.py + attacks/composite.py.
+    "detector_takeout+gps_spoofing": lambda: SequentialAttackInjector(
+        [
+            DetectorTakeoutInjector(),
+            GpsSpoofingInjector(
+                param_name="SIM_GPS_OFF_N",
+                spoofed_value=50.0,
+            ),
+        ],
     ),
 }
 

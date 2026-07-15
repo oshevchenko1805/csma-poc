@@ -36,6 +36,20 @@ client can't attach). So the attack does not open its own connection —
 the experiment layer hands it a `ParamWriter` in AttackContext, backed
 by the live mission controller. The attack layer only depends on this
 small Protocol; the mission layer provides the concrete implementation.
+
+MonitorHandle seam (monitor_takeout)
+------------------------------------
+An attack on the defensive perimeter (monitor_takeout) needs to stop
+the monitors of the target's failure domain — modelling loss of the
+observation contour (thesis Table 3.10, Detection capability row). The
+attack must not import runners/, so the experiment layer hands it the
+live monitors as `MonitorHandle` objects in AttackContext. The attack
+selects its victims structurally by `failure_domain`; there is no
+`if architecture` branching — architecture A's monitors share the
+`ground_station` domain, so disabling that domain drops all of them
+(single point of failure), while B/C's per-UAV domains drop only the
+target's monitor. The divergence in detection across A/B/C therefore
+falls out of the shared domain model, not out of attack-side branching.
 """
 
 from __future__ import annotations
@@ -59,6 +73,31 @@ class ParamWriter(Protocol):
     async def set_param_float(self, name: str, value: float) -> None: ...
 
 
+class MonitorHandle(Protocol):
+    """Minimal view of a fleet monitor an attack may need to disable.
+
+    Implemented by runners.monitor.Monitor. The attack layer depends
+    only on this Protocol so attacks/ never imports runners/. Structural
+    typing: any object exposing these two read attributes and a
+    synchronous stop() satisfies it.
+
+    - uav_id:          the UAV this monitor watches.
+    - failure_domain:  the shared failure domain (arch A: a single
+                       'ground_station' for all monitors; B/C: per-UAV).
+    - stop():          synchronous, idempotent teardown of the monitor
+                       (sets its stop event, stops the listener, joins
+                       its threads, closes its logger). After it the
+                       monitor no longer detects or publishes.
+    """
+
+    uav_id: str
+    failure_domain: str
+
+    def stop(self) -> None: ...
+
+    def disable_local_detectors(self) -> None: ...
+
+
 @dataclass
 class AttackContext:
     """What the runner hands to the injector at arm() time."""
@@ -71,6 +110,11 @@ class AttackContext:
     # mission runner can provide one (real MAVSDK flight); None otherwise
     # (e.g. NullMissionRunner). Only param-writing attacks use it.
     param_writer: Optional[ParamWriter] = None
+    # Live fleet monitors, provided by the experiment layer. Present for
+    # real runs; empty for contexts built without a fleet. Only attacks
+    # that disable the observation contour (monitor_takeout) read it. A
+    # tuple so an attack cannot mutate the fleet's monitor list.
+    monitors: tuple[MonitorHandle, ...] = ()
 
 
 class AttackInjector(ABC):
@@ -117,4 +161,3 @@ class NullAttackInjector(AttackInjector):
 
     async def cleanup(self) -> None:
         return None
-

@@ -263,6 +263,7 @@ class ExperimentRunner:
             target_sysid=target_sysid,
             log_dir=self._fleet.log_dir,
             param_writer=param_writer,
+            monitors=tuple(self._fleet.monitors),
         )
         await self._attack_injector.arm(ctx)
 
