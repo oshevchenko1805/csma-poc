@@ -1104,3 +1104,35 @@ JSONL on baseline runs is expected. Telemetry flow verified via
 listener stats (telemetry_seen ~15k-34k per monitor, 0 callback errors).
 
 **Test count: 446 passing. arch A/B/C all live-verified.**
+
+---
+
+## detector_takeout — mesh-advantage scenario (LIVE VERIFIED)
+
+Closes the Ch.3<->Ch.5 detection gap: proves cross_check adds detection
+that segmentation cannot, which the 3x4 matrix could not show (detection
+100% everywhere there).
+
+Threat model: adversary silences the TARGET monitor's local detectors
+(monitor stays alive, keeps publishing its position to the mesh), then
+GPS-spoofs. Composed via SequentialAttackInjector [detector_takeout,
+gps_spoofing]. No architecture branching: detector_takeout silences the
+one monitor whose uav_id == target; the A/B-vs-C split is purely a
+consequence of mesh+cross_check being wired (factory DI).
+
+Live smoke (attack-at 90s, obs 60s, target uav_0, N=1 each):
+  C: detected=True, n_sec=2 (cross_check, sources monitor_uav_1 +
+     monitor_uav_2, ZERO local gps events), impact_scope=1, FP=False
+  A: detected=False, n_sec=0
+  B: detected=False, n_sec=0
+
+Mechanism note (for Ch.4/5): killing the target's WHOLE monitor would
+also stop its peer-position publishing and blind cross_check (C would
+degrade to B). detector_takeout deliberately leaves the monitor alive so
+the mesh signal survives — this is the honest, precise threat model and
+must be stated as such (adversary compromises node-local IDS, not the
+telemetry link).
+
+Pending: batch N=10 per arch for Ch.5 statistics; monitor_takeout
+(whole-domain kill) still available for the complementary A-SPOF /
+blast-radius result but NOT yet live-verified.
