@@ -456,3 +456,59 @@ class TestBulkAndIO:
         assert "C/comm_disruption" in data
         assert "C/none" in data
         assert data["C/comm_disruption"]["n_runs"] == 2
+
+
+class TestImpactScopeTimeAnchor:
+    """impact_scope must count only post-attack events (same anchor as
+    `detected`). Regression: SITL heartbeat noise before the attack used to
+    inflate impact_scope, giving impact>0 while detected=False."""
+
+    def test_pre_attack_events_excluded(self):
+        events = [
+            _security(target="uav_1", t=5.0),   # before attack — noise
+            _security(target="uav_2", t=6.0),   # before attack — noise
+            _attack(target="uav_0", t=10.0),
+        ]
+        m = compute_run_metrics(
+            events=events, run_id="r1", architecture="A",
+            attack_type="detector_takeout+gps_spoofing", target_uav="uav_0",
+        )
+        assert m.impact_scope == 0
+        assert m.affected_uavs == []
+        assert m.detected is False  # consistent with impact_scope
+
+    def test_post_attack_events_counted(self):
+        events = [
+            _security(target="uav_1", t=5.0),   # noise, excluded
+            _attack(target="uav_0", t=10.0),
+            _security(target="uav_0", t=12.0),
+            _security(target="uav_2", t=13.0),
+        ]
+        m = compute_run_metrics(
+            events=events, run_id="r1", architecture="C",
+            attack_type="detector_takeout+gps_spoofing", target_uav="uav_0",
+        )
+        assert m.impact_scope == 2
+        assert m.affected_uavs == ["uav_0", "uav_2"]
+
+    def test_no_attack_marker_falls_back_to_all(self):
+        events = [_security(target="uav_0", t=5.0)]
+        m = compute_run_metrics(
+            events=events, run_id="r1", architecture="C",
+            attack_type="none", target_uav=None,
+        )
+        assert m.impact_scope == 1
+
+    def test_n_security_events_unfiltered(self):
+        # Diagnostics field keeps counting everything, incl. pre-attack noise.
+        events = [
+            _security(target="uav_1", t=5.0),
+            _attack(target="uav_0", t=10.0),
+            _security(target="uav_0", t=12.0),
+        ]
+        m = compute_run_metrics(
+            events=events, run_id="r1", architecture="A",
+            attack_type="detector_takeout+gps_spoofing", target_uav="uav_0",
+        )
+        assert m.n_security_events == 2
+        assert m.impact_scope == 1

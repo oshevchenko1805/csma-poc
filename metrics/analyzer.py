@@ -271,7 +271,18 @@ def compute_run_metrics(
         if isinstance(e, AttackEvent) and e.phase == "inject_start"
     ]
 
-    affected = sorted({s.target_uav for s in security_events if s.target_uav})
+    # Impact scope counts UAVs affected BY THE ATTACK, so it must use the
+    # same time anchor as `detected`: only security events at/after
+    # inject_start can be a consequence of the attack. Without this filter,
+    # spurious pre-attack events (e.g. heartbeat gaps from SITL load) inflate
+    # impact_scope and produce the contradiction impact>0 with detected=False.
+    # Falls back to all events when no inject_start marker exists.
+    if attacks_inject_start:
+        _attack_t = attacks_inject_start[0].timestamp
+        _scoped = [s for s in security_events if s.timestamp >= _attack_t]
+    else:
+        _scoped = security_events
+    affected = sorted({s.target_uav for s in _scoped if s.target_uav})
 
     metrics = RunMetrics(
         run_id=run_id,

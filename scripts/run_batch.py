@@ -77,6 +77,10 @@ VALID_ATTACKS = {
     "gps_spoofing",
     "comm_disruption",
     "command_injection",
+    # Composite mesh-advantage scenario: silence the target monitor's
+    # local detectors (monitor stays alive, keeps publishing to the mesh),
+    # then GPS-spoof. C detects via neighbours' cross_check; A/B go blind.
+    "detector_takeout+gps_spoofing",
 }
 
 # The 4 cells that have never been flown live (the smoke default).

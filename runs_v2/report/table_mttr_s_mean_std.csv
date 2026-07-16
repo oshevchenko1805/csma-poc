@@ -1,0 +1,5 @@
+Attack,A,B,C
+GPS spoofing,—,—,—
+Comm disruption,—,—,—
+Command injection,—,—,—
+GPS spoofing + local detector takeout,n/a,n/a,0.019±0.006 (10)

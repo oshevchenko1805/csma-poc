@@ -55,6 +55,7 @@ ATTACK_ORDER: list[str] = [
     "gps_spoofing",
     "comm_disruption",
     "command_injection",
+    "detector_takeout+gps_spoofing",
 ]
 BASELINE_ATTACK = "none"
 
@@ -62,6 +63,7 @@ ATTACK_LABELS: dict[str, str] = {
     "gps_spoofing": "GPS spoofing",
     "comm_disruption": "Comm disruption",
     "command_injection": "Command injection",
+    "detector_takeout+gps_spoofing": "GPS spoofing + local detector takeout",
     "none": "Baseline",
 }
 
