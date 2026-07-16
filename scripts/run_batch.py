@@ -81,6 +81,8 @@ VALID_ATTACKS = {
     # local detectors (monitor stays alive, keeps publishing to the mesh),
     # then GPS-spoof. C detects via neighbours' cross_check; A/B go blind.
     "detector_takeout+gps_spoofing",
+    # SPOF / blast-radius: take out uav_1's monitor domain, spoof uav_0.
+    "monitor_takeout+gps_spoofing",
 }
 
 # The 4 cells that have never been flown live (the smoke default).

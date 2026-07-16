@@ -61,6 +61,16 @@ from runners.factory import (
 )
 from runners.missions import MissionRunner, NullMissionRunner
 
+# Ground-truth trajectory file, written by an optional TrajectoryRecorder.
+# The runner owns the name so the merge step can exclude it reliably: it
+# holds pose samples, not events, and must never enter merged.jsonl.
+TRAJECTORY_FILENAME = "trajectory.jsonl"
+
+TrajectoryRecorderFactory = Any
+"""(out_path: Path) -> object with start()/stop()/stats. Injected so the
+real gz-backed recorder is used only for real flights; tests inject a fake
+or leave it None (no recording)."""
+
 
 @dataclass
 class RunResult:
@@ -75,6 +85,8 @@ class RunResult:
     merged_log: str
     monitor_stats: list[dict[str, Any]] = field(default_factory=list)
     coordinator_stats: list[dict[str, Any]] = field(default_factory=list)
+    trajectory_stats: Optional[dict[str, Any]] = None
+    """Ground-truth recorder counters, or None when not recording."""
     error: Optional[str] = None
 
 
@@ -100,6 +112,7 @@ class ExperimentRunner:
         mesh_factory: Optional[MeshFactory] = None,
         px4_path: Optional[Path] = None,
         process_runner: Optional[ProcessRunner] = None,
+        trajectory_recorder_factory: Optional[TrajectoryRecorderFactory] = None,
     ) -> None:
         if attack_at_sec < 0:
             raise ValueError("attack_at_sec must be non-negative")
@@ -121,10 +134,12 @@ class ExperimentRunner:
         self._mesh_factory = mesh_factory
         self._px4_path = px4_path
         self._process_runner = process_runner
+        self._trajectory_recorder_factory = trajectory_recorder_factory
 
         # State filled during run()
         self._fleet: Optional[WiredFleet] = None
         self._attack_logger: Optional[EventLogger] = None
+        self._trajectory_recorder: Optional[Any] = None
         self._start_wall: float = 0.0
 
     # ----- public entry point -----
@@ -199,6 +214,20 @@ class ExperimentRunner:
         self._attack_logger = EventLogger(
             self._fleet.log_dir / "attack.jsonl"
         )
+
+        # Ground-truth trajectory recorder (optional). Started before the
+        # mission so the pre-attack baseline is captured. It observes the
+        # simulator from outside the system under test, so it survives the
+        # attacks that stop monitors, and it is never fed by PX4's own
+        # (spoofable) estimate. A recorder failure must not fail a flight.
+        if self._trajectory_recorder_factory is not None:
+            try:
+                self._trajectory_recorder = self._trajectory_recorder_factory(
+                    self._fleet.log_dir / TRAJECTORY_FILENAME
+                )
+                self._trajectory_recorder.start()
+            except Exception:
+                self._trajectory_recorder = None
 
         # Start order: meshes -> monitors -> coordinators
         for mesh in self._fleet.meshes:
@@ -330,6 +359,12 @@ class ExperimentRunner:
                 mesh.stop()
             except Exception:
                 pass
+        # Stopped last: keeps recording through mission abort/RTL.
+        if self._trajectory_recorder is not None:
+            try:
+                self._trajectory_recorder.stop()
+            except Exception:
+                pass
         if self._attack_logger is not None:
             try:
                 self._attack_logger.close()
@@ -359,7 +394,13 @@ class ExperimentRunner:
         # Merge all per-component logs in the run directory.
         sources = sorted(log_dir.glob("*.jsonl"))
         # Exclude the merged file itself in case of re-runs.
-        sources = [p for p in sources if p.name != "merged.jsonl"]
+        # trajectory.jsonl holds pose samples, not events — merging it
+        # would pollute merged.jsonl and break the event readers.
+        sources = [
+            p
+            for p in sources
+            if p.name not in ("merged.jsonl", TRAJECTORY_FILENAME)
+        ]
         try:
             merge_jsonl(sources, merged_path)
         except Exception as exc:
@@ -378,6 +419,11 @@ class ExperimentRunner:
             merged_log=str(merged_path),
             monitor_stats=monitor_stats,
             coordinator_stats=coordinator_stats,
+            trajectory_stats=(
+                dict(self._trajectory_recorder.stats)
+                if self._trajectory_recorder is not None
+                else None
+            ),
             error=error,
         )
 

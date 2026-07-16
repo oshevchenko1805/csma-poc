@@ -55,6 +55,8 @@ from attacks.command_injection import CommandInjectionInjector  # noqa: E402
 from attacks.comm_disruption import CommDisruptionInjector  # noqa: E402
 from attacks.gps_spoofing import GpsSpoofingInjector  # noqa: E402
 from attacks.detector_takeout import DetectorTakeoutInjector  # noqa: E402
+from attacks.monitor_takeout import MonitorTakeoutInjector  # noqa: E402
+from runners.trajectory import TrajectoryRecorder  # noqa: E402
 from attacks.composite import SequentialAttackInjector  # noqa: E402
 from core.config import (  # noqa: E402
     ExperimentConfig,
@@ -123,6 +125,22 @@ ATTACK_FACTORIES: dict[str, Callable[[], AttackInjector]] = {
     "detector_takeout+gps_spoofing": lambda: SequentialAttackInjector(
         [
             DetectorTakeoutInjector(),
+            GpsSpoofingInjector(
+                param_name="SIM_GPS_OFF_N",
+                spoofed_value=50.0,
+            ),
+        ],
+    ),
+    # monitor_takeout scenario (SPOF / blast-radius test, thesis 3.9/3.10):
+    #   phase 1 — compromise the host running uav_1's monitor, stopping
+    #             every monitor in that host's failure domain;
+    #   phase 2 — GPS-spoof uav_0 (a DIFFERENT UAV).
+    # A: all monitors share the 'ground_station' domain, so uav_0's monitor
+    # dies too -> uav_0 undetected. B/C: per-UAV domains, uav_0's monitor
+    # survives -> uav_0 detected. Requires --target-uav uav_0.
+    "monitor_takeout+gps_spoofing": lambda: SequentialAttackInjector(
+        [
+            MonitorTakeoutInjector(takeout_uav="uav_1"),
             GpsSpoofingInjector(
                 param_name="SIM_GPS_OFF_N",
                 spoofed_value=50.0,
@@ -403,6 +421,19 @@ def main(argv: list[str] | None = None) -> int:
 
     process_runner = build_process_runner(args.px4_pid_file, exp_cfg)
 
+    # Ground-truth trajectory: only meaningful on a real flight, where
+    # Gazebo is up and publishing model poses. The Null mission has no
+    # simulator, so there is nothing to observe and no recorder is made.
+    # This is the ONLY observation channel outside the system under test:
+    # monitors get stopped by the takeout attacks and PX4's own estimate is
+    # corrupted by GPS spoofing by construction, so physical consequence
+    # (drift, mission progress, formation geometry) is measurable only here.
+    trajectory_factory = (
+        (lambda out_path: TrajectoryRecorder(out_path=out_path))
+        if args.mission == "mavsdk"
+        else None
+    )
+
     runner = ExperimentRunner(
         arch_cfg=arch_cfg,
         exp_cfg=exp_cfg,
@@ -412,6 +443,7 @@ def main(argv: list[str] | None = None) -> int:
         mission_runner=mission,
         target_uav=args.target_uav,
         process_runner=process_runner,
+        trajectory_recorder_factory=trajectory_factory,
         **extra,
     )
 
@@ -421,6 +453,11 @@ def main(argv: list[str] | None = None) -> int:
         f"target={args.target_uav} run_id={run_id} mission={args.mission}"
     )
     _log(f"log_dir will be: {expected_log_dir}")
+    _log(
+        "trajectory: recording Gazebo ground truth"
+        if trajectory_factory is not None
+        else "trajectory: OFF (no simulator in this mission mode)"
+    )
     if isinstance(mission, MavsdkMissionRunner):
         _log(f"mavsdk endpoints: {mission._endpoints}")
     else:

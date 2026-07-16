@@ -1,45 +1,62 @@
 """
-monitor_takeout — attack on the defensive perimeter.
+monitor_takeout — attack on the defensive perimeter (blast radius / SPOF).
 
-Where the payload attacks (comm_disruption, command_injection,
-gps_spoofing) strike a *useful* UAV, this attack strikes the
-*observation contour* itself: it stops the monitors that watch the
-target's failure domain. It exists to test empirically the claim made
-in the thesis (Table 3.10, Detection capability row):
+Where detector_takeout isolates the marginal value of the mesh, this
+attack isolates the *blast radius* of compromising the host that runs a
+monitor — i.e. it tests the single-point-of-failure claim the thesis
+makes for Architecture A (Tables 3.9 / 3.10: A's security loop depends
+on the availability of the central C2, so losing the centre takes the
+whole loop with it).
 
-  - Architecture A (centralised): all monitors share one failure
-    domain ('ground_station'), so disabling that domain removes the
-    entire detection contour — the single point of failure the model
-    predicts. Detection of a subsequent incident is expected to
-    collapse.
-  - Architecture B (segmented, no mesh): each monitor is its own
-    per-UAV domain. Disabling the target's monitor removes local
-    detection for that UAV; neighbours cannot compensate (no security
-    context sharing).
-  - Architecture C (CSMA): each monitor is its own per-UAV domain too,
-    but neighbours share security context over the mesh (cross_check),
-    so detection of the target is expected to survive the loss of its
-    own monitor.
+Scenario
+--------
+The adversary compromises the host running the monitor of ONE UAV (the
+`takeout_uav`), stopping every monitor that shares that host's failure
+domain. Then a *different* UAV (the attack target) is GPS-spoofed. What
+is measured is whether the target is still detected.
 
-Design discipline
------------------
-The injector never branches on architecture. It resolves the target's
-failure domain from the target's own monitor, then stops every monitor
-that shares that domain. The A/B/C divergence is a consequence of how
-the factory assigns `failure_domain` (shared vs per-UAV), not of any
-attack-side logic. See attacks.base.MonitorHandle for the seam.
+  - A (centralised): every monitor lives in the single 'ground_station'
+    failure domain. Compromising the host of ANY monitor stops ALL of
+    them — including the target's. -> target undetected.
+  - B (segmented):   monitors are per-UAV failure domains. Only the
+    takeout_uav's monitor dies; the target's monitor is untouched.
+    -> target detected.
+  - C (CSMA):        same per-UAV domains, plus mesh.
+    -> target detected.
+
+The action is IDENTICAL in all three architectures — compromise the host
+of one monitor. That in A this removes three monitors and in B/C only
+one is not an unfair handicap: it is the definition of a single point of
+failure, and it is precisely the property under test. Nothing here
+branches on architecture; the divergence comes from how the factory
+assigns `failure_domain` (shared 'ground_station' vs per-UAV), which is
+a pure config/DI choice.
+
+Why the takeout target must differ from the attack target
+---------------------------------------------------------
+Taking out the *attack target's own* domain measures nothing: in A, B
+and C alike the target's monitor dies, so the target goes undetected
+everywhere (0%/0%/0%). In C it also silences the target's peer-position
+publishing, blinding the neighbours' cross_check — C degrades to B for a
+mechanical reason, not an architectural one. Attacking a *neighbour's*
+domain is what exposes the blast radius: it leaves B/C's detection of
+the target fully intact while collapsing A's.
+
+(To silence the target's own detection while keeping the mesh signal
+alive, use detector_takeout instead — a different threat model.)
 
 Mechanics
 ---------
-- arm():   capture the live monitors + target from AttackContext.
-- fire():  resolve the target's domain, stop every monitor in it. The
-           stops run in a thread executor so the (synchronous, thread-
-           joining) Monitor.stop() never blocks the experiment event
-           loop — important for arch A where three monitors are stopped
-           at once.
-- cleanup(): no-op. The monitors stay down by design; the run is
-           ending and the ExperimentRunner teardown calls stop() again
-           (idempotent). Reviving the perimeter would defeat the point.
+- arm():   capture the live monitors + attack target from AttackContext.
+- fire():  resolve the failure domain of `takeout_uav` (defaults to the
+           attack target when not given), stop every monitor sharing it.
+           Stops run in a thread executor because Monitor.stop() is
+           synchronous and joins threads — in arch A three monitors are
+           stopped at once and the experiment event loop must keep
+           servicing mission telemetry.
+- cleanup(): no-op. The monitors stay down by design; the ExperimentRunner
+           teardown calls stop() again (idempotent). Reviving the
+           perimeter would defeat the point.
 """
 
 from __future__ import annotations
@@ -51,11 +68,19 @@ from attacks.base import AttackContext, AttackInjector, MonitorHandle
 
 
 class MonitorTakeoutInjector(AttackInjector):
-    """Disable the monitors of the target's failure domain mid-flight."""
+    """Stop every monitor sharing the failure domain of one chosen UAV."""
 
     name_: str = "monitor_takeout"
 
-    def __init__(self) -> None:
+    def __init__(self, takeout_uav: Optional[str] = None) -> None:
+        """
+        takeout_uav: whose monitor's failure domain to take out. When
+            None, falls back to the attack target from AttackContext
+            (a pure perimeter-loss run). For the SPOF / blast-radius
+            scenario this MUST be a UAV other than the attack target —
+            see module docstring.
+        """
+        self._takeout_uav_arg = takeout_uav
         self._monitors: tuple[MonitorHandle, ...] = ()
         self._target_uav: Optional[str] = None
         self._armed: bool = False
@@ -77,10 +102,14 @@ class MonitorTakeoutInjector(AttackInjector):
         """The failure domain that was taken out (post-fire)."""
         return self._target_domain
 
+    @property
+    def takeout_uav(self) -> Optional[str]:
+        """The UAV whose domain gets taken out (resolved after arm())."""
+        return self._takeout_uav_arg or self._target_uav
+
     async def arm(self, ctx: AttackContext) -> None:
-        # Capture the live monitors and the target. We do NOT stop
-        # anything here — arm() only prepares; the effect happens in
-        # fire() at attack_at_sec.
+        # Capture the live monitors and the attack target. Nothing is
+        # stopped here — arm() only prepares; the effect is in fire().
         self._monitors = tuple(ctx.monitors)
         self._target_uav = ctx.target_uav
         self._armed = True
@@ -89,11 +118,10 @@ class MonitorTakeoutInjector(AttackInjector):
         if not self._armed:
             raise RuntimeError("monitor_takeout.fire() called before arm()")
 
-        domain = self._resolve_target_domain()
+        domain = self._resolve_domain()
         victims = [m for m in self._monitors if m.failure_domain == domain]
 
-        # Stop synchronously-joining monitors off the event loop so
-        # mission telemetry keeps flowing while threads wind down.
+        # Stop off the event loop: Monitor.stop() joins threads.
         loop = asyncio.get_running_loop()
         await asyncio.gather(
             *(loop.run_in_executor(None, m.stop) for m in victims)
@@ -104,27 +132,24 @@ class MonitorTakeoutInjector(AttackInjector):
         self._fired = True
 
     async def cleanup(self) -> None:
-        # No-op by design: monitors remain stopped. The ExperimentRunner
-        # teardown stops them again idempotently. See module docstring.
+        # No-op by design: monitors remain stopped. See module docstring.
         return None
 
     # ----- internals -----
 
-    def _resolve_target_domain(self) -> str:
-        """Find the target's own monitor and return its failure domain.
+    def _resolve_domain(self) -> str:
+        """Return the failure domain of the UAV whose monitor we take out.
 
-        Raising here is intentional: monitor_takeout only makes sense
-        when the runner supplied live monitors that include one watching
-        the target. A missing target monitor is a misconfiguration, not
-        something to silently swallow (mirrors gps_spoofing raising when
-        no param_writer is present).
+        Raising is intentional: monitor_takeout only makes sense when the
+        runner supplied live monitors including one for that UAV. A
+        missing monitor is a misconfiguration, not something to swallow.
         """
+        whose = self.takeout_uav
         for m in self._monitors:
-            if m.uav_id == self._target_uav:
+            if m.uav_id == whose:
                 return m.failure_domain
         raise RuntimeError(
-            f"monitor_takeout: no monitor watches target "
-            f"{self._target_uav!r} (monitors present: "
-            f"{[m.uav_id for m in self._monitors]!r}). Was the injector "
-            f"given a real fleet via AttackContext.monitors?"
+            f"monitor_takeout: no monitor watches {whose!r} "
+            f"(monitors present: {[m.uav_id for m in self._monitors]!r}). "
+            f"Was the injector given a real fleet via AttackContext.monitors?"
         )

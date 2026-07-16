@@ -147,7 +147,7 @@ class TestGuards:
     def test_fire_with_no_monitors_raises(self):
         inj = MonitorTakeoutInjector()
         asyncio.run(inj.arm(_ctx([], "uav_0")))
-        with pytest.raises(RuntimeError, match="no monitor watches target"):
+        with pytest.raises(RuntimeError, match="no monitor watches"):
             asyncio.run(inj.fire())
 
     def test_fire_with_target_absent_raises(self):
@@ -155,7 +155,7 @@ class TestGuards:
         mons = _per_uav_monitors()
         inj = MonitorTakeoutInjector()
         asyncio.run(inj.arm(_ctx(mons, "uav_9")))
-        with pytest.raises(RuntimeError, match="no monitor watches target"):
+        with pytest.raises(RuntimeError, match="no monitor watches"):
             asyncio.run(inj.fire())
 
 
@@ -181,3 +181,49 @@ class TestCleanup:
         asyncio.run(inj.arm(_ctx(_per_uav_monitors(), "uav_0")))
         # cleanup before fire must be a safe no-op.
         asyncio.run(inj.cleanup())
+
+
+class TestNonTargetTakeout:
+    """SPOF / blast-radius scenario: take out a NON-target UAV's domain,
+    then attack a different UAV. In A the shared ground_station domain
+    means the target's monitor dies too; in B/C it survives."""
+
+    def test_arch_a_neighbour_takeout_kills_target_monitor(self):
+        mons = _arch_a_monitors()
+        inj = MonitorTakeoutInjector(takeout_uav="uav_1")
+        asyncio.run(inj.arm(_ctx(mons, "uav_0")))  # attack target = uav_0
+        asyncio.run(inj.fire())
+        # Shared domain: taking out uav_1's host stops every monitor,
+        # including the one watching the attack target uav_0.
+        assert all(m.stopped for m in mons)
+        assert inj.target_domain == "ground_station"
+        assert sorted(inj.stopped_uavs) == ["uav_0", "uav_1", "uav_2"]
+
+    def test_per_uav_neighbour_takeout_spares_target_monitor(self):
+        mons = _per_uav_monitors()
+        inj = MonitorTakeoutInjector(takeout_uav="uav_1")
+        asyncio.run(inj.arm(_ctx(mons, "uav_0")))
+        asyncio.run(inj.fire())
+        by_id = {m.uav_id: m for m in mons}
+        # Only uav_1's monitor dies; the target's monitor lives on.
+        assert by_id["uav_1"].stopped
+        assert not by_id["uav_0"].stopped
+        assert not by_id["uav_2"].stopped
+        assert inj.stopped_uavs == ["uav_1"]
+        assert inj.target_domain == "uav_1"
+
+    def test_takeout_uav_property(self):
+        inj = MonitorTakeoutInjector(takeout_uav="uav_1")
+        asyncio.run(inj.arm(_ctx(_per_uav_monitors(), "uav_0")))
+        assert inj.takeout_uav == "uav_1"
+
+    def test_defaults_to_attack_target(self):
+        inj = MonitorTakeoutInjector()
+        asyncio.run(inj.arm(_ctx(_per_uav_monitors(), "uav_2")))
+        assert inj.takeout_uav == "uav_2"
+
+    def test_unknown_takeout_uav_raises(self):
+        inj = MonitorTakeoutInjector(takeout_uav="uav_9")
+        asyncio.run(inj.arm(_ctx(_per_uav_monitors(), "uav_0")))
+        with pytest.raises(RuntimeError, match="no monitor watches"):
+            asyncio.run(inj.fire())

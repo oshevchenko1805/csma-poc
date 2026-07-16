@@ -260,3 +260,83 @@ class TestValidation:
                 log_root=tmp_path,
                 attack_at_sec=-1.0,
             )
+
+
+# ---------------------------------------------------------------------------
+# Ground-truth trajectory recorder wiring
+# ---------------------------------------------------------------------------
+
+
+class FakeRecorder:
+    """Stands in for TrajectoryRecorder: writes one pose-shaped line so we
+    can assert it never leaks into merged.jsonl."""
+
+    def __init__(self, out_path: Path, *, start_raises: bool = False) -> None:
+        self.out_path = out_path
+        self.started = False
+        self.stopped = False
+        self._start_raises = start_raises
+        self.stats = {"samples_written": 0}
+
+    def start(self) -> None:
+        if self._start_raises:
+            raise RuntimeError("gz missing")
+        self.started = True
+        self.out_path.write_text(
+            json.dumps({"t_wall": 1.0, "uav_id": "uav_0", "x": 1.0}) + "\n"
+        )
+        self.stats["samples_written"] = 1
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+class TestTrajectoryWiring:
+    def test_recorder_started_and_stopped(self, tmp_path: Path):
+        made: list[FakeRecorder] = []
+
+        def factory(out_path: Path) -> FakeRecorder:
+            r = FakeRecorder(out_path)
+            made.append(r)
+            return r
+
+        runner = _make_runner(tmp_path, "a")
+        runner._trajectory_recorder_factory = factory
+        runner.run()
+        assert len(made) == 1
+        assert made[0].started and made[0].stopped
+        assert made[0].out_path.name == "trajectory.jsonl"
+
+    def test_trajectory_excluded_from_merged(self, tmp_path: Path):
+        runner = _make_runner(tmp_path, "a")
+        runner._trajectory_recorder_factory = lambda p: FakeRecorder(p)
+        result = runner.run()
+        traj = Path(result.log_dir) / "trajectory.jsonl"
+        assert traj.exists()  # recorder really wrote it
+        # Pose samples must never enter the event log.
+        merged_text = Path(result.merged_log).read_text()
+        assert '"uav_id": "uav_0", "x": 1.0' not in merged_text
+        assert "trajectory" not in merged_text
+
+    def test_stats_in_summary(self, tmp_path: Path):
+        runner = _make_runner(tmp_path, "a")
+        runner._trajectory_recorder_factory = lambda p: FakeRecorder(p)
+        result = runner.run()
+        assert result.trajectory_stats == {"samples_written": 1}
+        data = json.loads((Path(result.log_dir) / "run_summary.json").read_text())
+        assert data["trajectory_stats"]["samples_written"] == 1
+
+    def test_no_recorder_by_default(self, tmp_path: Path):
+        result = _make_runner(tmp_path, "a").run()
+        assert result.trajectory_stats is None
+        assert not (Path(result.log_dir) / "trajectory.jsonl").exists()
+
+    def test_recorder_failure_does_not_fail_run(self, tmp_path: Path):
+        # A dead gz must degrade to "no trajectory", never break a flight.
+        runner = _make_runner(tmp_path, "a")
+        runner._trajectory_recorder_factory = lambda p: FakeRecorder(
+            p, start_raises=True
+        )
+        result = runner.run()
+        assert result.error is None
+        assert result.trajectory_stats is None
