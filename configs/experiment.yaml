@@ -23,9 +23,34 @@ mission:
   type: coordinated_waypoint
   duration_sec: 300
 
-  # Square trajectory at 20 m altitude. Edge length 30 m.
+  # One lap of a 30x30 m square at 20 m, flown `laps` times.
+  #
+  # Route sizing (RESULTS_NOTES.md OPEN-1). Measured from a live
+  # trajectory.jsonl: with a single lap the UAV started moving at t~21 s
+  # (arm + takeoff), closed the lap at t~57 s, then hovered at home for
+  # the rest of the trial. Every attack at t=90 s therefore hit a
+  # HOVERING UAV and mission resilience (thesis §3.4.5) could not be
+  # measured at all.
+  #
+  # Measured lap time is ~34 s (120 m perimeter, 5 m/s cruise, ~3.5 m/s
+  # average with corner deceleration). Five laps keep the UAV in motion
+  # from t~21 s to t~191 s, well past the end of a trial:
+  #   - attack at t=90 s            -> lap 3, UAV in motion (verified)
+  #   - observation ends at t=150 s -> lap 4, UAV in motion (verified)
+  # Four laps also clear the window, but only by ~8 s; is_armable
+  # (EKF/GPS convergence) varies run to run, and an 8 s margin would not
+  # survive a 1000+ trial campaign. Five costs nothing: the runner never
+  # waits for mission completion (it sleeps attack_at + observation),
+  # so route length does not affect trial duration.
+  #
+  # The mission deliberately does NOT complete inside a trial. That is
+  # what "attack on a mission in progress" requires.
+  #
+  # The lap does not repeat its first point at the end — a closing (0,0)
+  # would make every lap seam two identical consecutive waypoints, which
+  # is a no-op for PX4. core.config rejects that case outright.
+  laps: 5
   waypoints:
-    - {north_m:  0.0, east_m:  0.0, alt_m: 20.0}
     - {north_m: 30.0, east_m:  0.0, alt_m: 20.0}
     - {north_m: 30.0, east_m: 30.0, alt_m: 20.0}
     - {north_m:  0.0, east_m: 30.0, alt_m: 20.0}

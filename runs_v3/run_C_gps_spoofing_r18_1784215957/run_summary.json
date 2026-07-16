@@ -1,0 +1,110 @@
+{
+  "architecture": "C",
+  "run_id": "C_gps_spoofing_r18_1784215957",
+  "attack_name": "gps_spoofing",
+  "target_uav": "uav_0",
+  "duration_sec": 160.06248092651367,
+  "log_dir": "/home/v/csma_poc_v2/runs_v3/run_C_gps_spoofing_r18_1784215957",
+  "merged_log": "/home/v/csma_poc_v2/runs_v3/run_C_gps_spoofing_r18_1784215957/merged.jsonl",
+  "monitor_stats": [
+    {
+      "telemetry_seen": 34168,
+      "security_emitted": 1,
+      "isolation_announced": 1,
+      "isolation_enforced": 1,
+      "peer_positions_published": 159,
+      "peer_positions_received": 316,
+      "handler_errors": 0,
+      "listener_received": 34329,
+      "listener_filtered_sysid": 161,
+      "listener_filtered_type": 0,
+      "listener_emitted": 34168,
+      "listener_callback_errors": 0,
+      "enforcer_enforce_count": 1,
+      "enforcer_enforce_idempotent": 0,
+      "enforcer_lift_count": 0,
+      "enforcer_currently_isolated": 1,
+      "enforcer_mesh_publish_count": 1,
+      "enforcer_mesh_publish_errors": 0
+    },
+    {
+      "telemetry_seen": 34186,
+      "security_emitted": 1,
+      "isolation_announced": 1,
+      "isolation_enforced": 1,
+      "peer_positions_published": 159,
+      "peer_positions_received": 316,
+      "handler_errors": 0,
+      "listener_received": 34347,
+      "listener_filtered_sysid": 161,
+      "listener_filtered_type": 0,
+      "listener_emitted": 34186,
+      "listener_callback_errors": 0,
+      "enforcer_enforce_count": 1,
+      "enforcer_enforce_idempotent": 0,
+      "enforcer_lift_count": 1,
+      "enforcer_currently_isolated": 0,
+      "enforcer_mesh_publish_count": 1,
+      "enforcer_mesh_publish_errors": 0
+    },
+    {
+      "telemetry_seen": 33804,
+      "security_emitted": 1,
+      "isolation_announced": 1,
+      "isolation_enforced": 1,
+      "peer_positions_published": 157,
+      "peer_positions_received": 318,
+      "handler_errors": 0,
+      "listener_received": 33964,
+      "listener_filtered_sysid": 160,
+      "listener_filtered_type": 0,
+      "listener_emitted": 33804,
+      "listener_callback_errors": 0,
+      "enforcer_enforce_count": 1,
+      "enforcer_enforce_idempotent": 0,
+      "enforcer_lift_count": 1,
+      "enforcer_currently_isolated": 0,
+      "enforcer_mesh_publish_count": 1,
+      "enforcer_mesh_publish_errors": 0
+    }
+  ],
+  "coordinator_stats": [
+    {
+      "peer_positions_seen": 316,
+      "isolations_seen": 2,
+      "recovery_requests_issued": 0,
+      "recovery_requests_executed": 2,
+      "recovery_acks_received": 0,
+      "handler_errors": 0,
+      "skipped_not_coordinator": 2,
+      "skipped_not_target": 0
+    },
+    {
+      "peer_positions_seen": 316,
+      "isolations_seen": 2,
+      "recovery_requests_issued": 2,
+      "recovery_requests_executed": 0,
+      "recovery_acks_received": 2,
+      "handler_errors": 0,
+      "skipped_not_coordinator": 0,
+      "skipped_not_target": 0
+    },
+    {
+      "peer_positions_seen": 318,
+      "isolations_seen": 2,
+      "recovery_requests_issued": 0,
+      "recovery_requests_executed": 0,
+      "recovery_acks_received": 2,
+      "handler_errors": 0,
+      "skipped_not_coordinator": 2,
+      "skipped_not_target": 2
+    }
+  ],
+  "trajectory_stats": {
+    "lines_read": 8199,
+    "samples_written": 2277,
+    "parse_errors": 0,
+    "source_errors": 0
+  },
+  "error": null
+}

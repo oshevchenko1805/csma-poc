@@ -184,7 +184,20 @@ defensible line of future work that falls out of the measurements.
 
 To quantify: compare final drift across A/B (no recovery) vs C (loiter)
 across the campaign. If drift is equal, the point is proven
-quantitatively.
+quantitatively. **Now feasible** — see R7: with a mission actually in
+progress the drift is large and unambiguous. See also R8 for what an
+*undetected* spoof does physically, which is the natural control case for
+this comparison.
+
+### Related: "MTTR" is currently misnamed (raise in Ch.5, do not paper over)
+MTTR across runs_v3 is **0.015 ± 0.006 s**. Fifteen milliseconds is not a
+recovery time; it is the latency from decision to *issuing* the loiter
+command. Combined with the finding above — that loiter does not restore a
+safe state under an integrity attack — the metric measures reaction
+dispatch, not recovery. The number is not wrong, the name is. Ch.5 needs
+the honest decomposition (dispatch latency vs. actual restoration vs.
+PX4 cold-start, per PROJECT_STATE) rather than a headline "MTTR = 15 ms",
+which a reviewer will correctly attack.
 
 ---
 
@@ -227,25 +240,139 @@ during the runs_v1 collection but did not affect it.
 
 ---
 
-## OPEN-1 (BLOCKER for the campaign) — the mission ends before the attack
+## R7. OPEN-1 resolved — the mission now outlasts the trial
 
-In `run_c_gps_spoofing_1784198230`, uav_1 is at (5, 0) = home at attack
-time, and the trajectory range shows it had already flown the full route
-(to x≈30, y≈30) and returned. **The mission completes before t=90 s**, so
-the attack hits a hovering drone.
+**Was the campaign blocker. Closed with data, not argument.**
 
-Consequences:
-- **Mission resilience is currently unmeasurable** — there is no mission
-  in progress to degrade. The 3.4.5 property cannot be closed as is.
-- Every existing result (R1-R4, runs_v1, runs_v2) describes an attack on a
-  **hovering** UAV, not on one executing a mission. This is defensible but
-  must be stated — or fixed.
+### The measurement that established it
+Trajectory of `run_c_gps_spoofing_*` (ground truth, uav_1 = control):
 
-Options: lengthen the route, or fire earlier (but not before EKF
-convergence, ~30-60 s — 30 s is known to be too early).
+| t | state |
+|---|---|
+| 0 – 10.9 s | on ground (arm / pre-arm) |
+| 10.9 – 21 s | climb to 20 m |
+| **21 – 57 s** | **flying the square** |
+| **57 – 161 s** | **hovering at home, v ≈ 0.03 m/s** |
 
-**Must be decided before the ~1160-run campaign**, or the campaign
-collects the wrong thing.
+The single-lap route finished at **t ≈ 57 s** while attacks fire at
+**t = 90 s**. Every attack in R1-R4, runs_v1 and runs_v2 therefore hit a
+**hovering** UAV, and mission resilience (3.4.5) was unmeasurable.
+
+### The fix
+`mission.laps` in `configs/experiment.yaml` (new, `core/config.py`),
+default 1. The authored lap pattern is repeated `laps` times at load
+time; `MissionConfig.waypoints` is the fully expanded plan, so
+`runners/mission_mavsdk.py` and `runners/experiment.py` are untouched and
+know nothing about laps. Architecture discipline holds: config only, no
+`if architecture` anywhere.
+
+Shipped value: **`laps: 5`**, square lap of 4 corners → 20-item plan.
+
+Sizing, from measurement rather than estimate:
+- lap time ≈ 34 s (120 m perimeter, 5 m/s cruise, ≈3.5 m/s average with
+  corner deceleration)
+- motion from t ≈ 21 s to t ≈ 191 s
+- attack at t = 90 s → lap 3, in motion (**verified**, v = 2.7-5.1 m/s on
+  all three UAVs)
+- observation ends t = 150 s → lap 4, in motion (**verified**, v = 1.5-5.0
+  m/s on all three)
+
+4 laps also clears the window but only by ~8 s; `is_armable` (EKF/GPS
+convergence) varies run to run and 8 s would not survive a 1000+ trial
+campaign. 5 costs nothing: **the runner never waits for mission
+completion** (`wait_until_complete` is never called; it sleeps
+`attack_at + observation`), so route length does not change trial
+duration — confirmed: 160.7 s before, 160.5 s after.
+
+The mission deliberately does **not** complete inside a trial. That is
+what "attack on a mission in progress" requires.
+
+### Guards added (14 new tests, 512 → 526, all passing)
+- `laps` validated: integer (rejects `2.5`, rejects `true`), ≥ 1
+- expanded plan rejects **identical consecutive waypoints** — a
+  self-closing lap would produce one at every seam and it is a no-op for
+  PX4. Previously this could only be caught by eyeballing a trajectory.
+- `test_experiment_mission_is_multi_lap` asserts the shipped config still
+  flies ≥ 4 laps. If someone trims it back to one, a test fails instead of
+  a campaign silently collecting hover data again.
+
+### For Ch.4 (methodology)
+Route length is an experiment parameter with a stated derivation, and the
+earlier datasets (runs_v1, runs_v2, R1-R4) are explicitly
+attacks-on-hover. That is defensible if stated; it is indefensible if
+discovered by a reviewer.
+
+---
+
+## R8. Detection under motion is stable — 20/20, and a detector gradient
+
+**The question R7 forced:** if every prior result measured a hovering
+UAV, does detection survive when the UAV is actually flying? The
+`gps_spoofing` row of Ch.5 depended on the answer.
+
+### Data (`runs_v3/`, batch N=20, arch C, 5-lap route, 90/60 timing)
+
+| Metric | value |
+|---|---|
+| Detection rate | **20/20** — Wilson 95% CI **[84%, 100%]** |
+| MTTD | 3.113 ± 0.677 s |
+| Impact scope | 1.00 ± 0.00 |
+| False positives | 0/20 |
+
+Write it as "20/20, 95% CI [84%, 100%]", never as a bare "100%".
+
+Two things settled at once: detection is not an artefact of hovering,
+**and** the metrics did not break on the new route — `cross_check` does
+not fire falsely on genuinely moving neighbours (impact_scope 1.00,
+FP 0/20).
+
+### The gradient — do not omit this from Ch.5
+Detectors firing per run were not constant:
+
+| runs | detectors fired | MTTD |
+|---|---|---|
+| 19 of 20 | 3 | 2.58 – 3.28 s (mean 2.97, sd 0.22) |
+| **r10** | **1** | **5.84 s** |
+| `run_c_gps_spoofing_1784210522` (manual, outside runs_v3) | **0** | not detected |
+
+Excluding r10 is a **post-hoc** exclusion and must not be used for the
+headline: report 3.113 ± 0.677 (N=20). The point of the breakdown is that
+the sd is driven entirely by one run, and that 3 → 1 → 0 is a gradient,
+not a binary.
+
+So `1784210522` (the one manual run that was never detected, whose UAV
+then flew uncontrolled to −83 m and dropped to **z = 0.5 m** — see below)
+is the far end of a real distribution, not an isolated glitch. Something
+in the ramp-onset signature varies run to run. **Cause unknown.**
+
+### The physical control case (extends R4)
+`1784210522` is the natural control for R4's drift comparison: same
+attack, detection simply did not occur, so nothing issued loiter.
+
+| | `208189` (detected, mttd 2.6) | `210522` (not detected) |
+|---|---|---|
+| t = 110 s | (29.8, 28.4) z = 20.3 | (−6.6, −29.1) **z = 0.5** |
+| t = 120 s | (30.0, −16.7) | (−80.9, −40.0) |
+| range | x[0..30] y[−20..30] | x[−83..30] y[−50..31] |
+
+Read the causality correctly: the wild trajectory is a **consequence** of
+non-detection, not its cause. Detected → isolation → loiter → the UAV
+stopped at ~20 m offset and held. Undetected → the mission kept executing
+in a falsified frame → the UAV was thrown across the field and nearly
+touched the ground. This is what R4's "loiter is inadequate" costs when
+even the inadequate response is absent.
+
+### What was ruled out (do not re-investigate)
+The natural hypothesis was `SIM_GPS_OFF_N` leaking between runs via
+per-instance param storage: `run_batch` clears
+`rootfs/{0,1,2}/parameters*.bson` between trials, the manual `run_one.py`
+does not. **Checked and false** — after a normal run only
+`parameters_backup.bson` exists and `SIM_GPS_OFF_N` is **not in it** on
+any instance. Nothing leaks. See also OPEN-4.
+
+### Thesis placement
+Ch.5: the gps_spoofing row with CI. Ch.4: the honest note that the
+detectable signature is the ramp onset, and its strength varies (OPEN-3).
 
 ---
 
@@ -270,3 +397,60 @@ Recorded here so the intent is not lost:
    for MTTD, Fisher exact for binary cells, and logistic regression
    `detection ~ magnitude × architecture` (gives threshold estimates and
    their difference between architectures).
+
+`mission.laps` (R7) makes flight duration a single-number parameter, so
+route length can join these sweeps without hand-editing waypoints.
+
+---
+
+## OPEN-3 — the ramp-onset signature varies run to run
+
+From R8: 19/20 runs fired 3 detectors at ~2.97 s; one fired 1 at 5.84 s;
+one manual run fired none. Cause unknown.
+
+Why it matters: the detectable signature of the GZBridge offset injection
+is the **onset transient** (the ramp), not the steady state — already
+documented as a methodological note for Ch.4. If the onset is sometimes
+weak enough to miss, the detection rate is a property of the *injection*
+as much as of the architecture, and that belongs in threats-to-validity.
+
+**Cannot be investigated with current data.** `run_c_gps_spoofing_1784210522`
+contains zero security events — monitors log events, not raw telemetry, so
+there is nothing to inspect. Needs the instrumentation below (PX4 true vs
+believed position, and the raw `pos_horiz_ratio` series) before it can be
+answered. Do not spend more runs guessing at it first.
+
+---
+
+## OPEN-4 — is the bson-clearing discipline actually necessary?
+
+PROJECT_STATE records as an operational rule: per-instance param storage
+at `build/px4_sitl_default/rootfs/{0,1,2}/parameters*.bson` persists
+across restarts and **must** be cleared between runs to stop
+`SIM_GPS_OFF_N` leaking into baseline runs.
+
+Contradicting observation (R8): after a completed run, only
+`parameters_backup.bson` exists — no `parameters.bson` — and
+`SIM_GPS_OFF_N` appears in **none** of the three instances. If the param
+never reaches persistent storage, there is nothing to leak and the rule
+protects against nothing.
+
+Low priority, no action now: `run_batch` clears the files anyway and the
+clearing is harmless. But the rule is currently stated as fact in
+PROJECT_STATE on the basis of something that was apparently never
+verified — either confirm it or correct it before Ch.4 cites it as
+methodology. Do not remove the cleanup step on the strength of one
+observation.
+
+---
+
+## Work queue (order matters)
+
+1. **Instrumentation — before the campaign, not after.** Mission plan in
+   `run_summary` (so "was the UAV flying?" is checkable per run instead of
+   by hand-reading trajectories — R7 was found by eye and should never
+   need to be again); mesh cost counters; PX4 true-vs-believed position;
+   mesh loss/delay. Omitting this means re-running ~1160 trials.
+2. R2 batch (currently N=1 smoke; R1 already has N=10).
+3. OPEN-2 sweeps.
+4. Full campaign, N=30/cell, with the statistics from OPEN-2.4.

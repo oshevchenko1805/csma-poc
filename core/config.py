@@ -108,9 +108,53 @@ class Waypoint:
 
 @dataclass(frozen=True)
 class MissionConfig:
+    """A mission plan.
+
+    `waypoints` is the FULLY EXPANDED plan — the exact sequence uploaded
+    to the vehicle. `laps` is how many times the authored lap pattern was
+    repeated to produce it (1 = the pattern is the plan). The loader does
+    the expansion; every consumer downstream (runners.mission_mavsdk,
+    runners.experiment) sees only `waypoints` and needs no knowledge of
+    laps.
+
+    Why laps exists at all
+    ----------------------
+    Flight duration is an experiment parameter, not decoration. A live
+    trajectory showed the single-lap route finishing at t~57 s while
+    attacks fire at t=90 s — every attack hit a HOVERING UAV and mission
+    resilience (thesis §3.4.5) was unmeasurable (RESULTS_NOTES OPEN-1).
+    The fix is more laps. Expressing that as `laps: N` rather than a
+    hand-copied waypoint list keeps it (a) a single number to change for
+    the OPEN-2 parametric sweeps, and (b) impossible to mis-transcribe.
+
+    `lap_waypoints` recovers the authored pattern by slicing rather than
+    storing it twice — two copies of the same fact can disagree; a
+    derived one cannot.
+    """
+
     type: str
     duration_sec: float
-    waypoints: tuple[Waypoint, ...]
+    waypoints: tuple[Waypoint, ...]   # expanded plan (lap pattern x laps)
+    laps: int = 1
+
+    def __post_init__(self) -> None:
+        # Total invariants: hold for loader-built AND hand-built configs
+        # (tests construct MissionConfig directly).
+        if self.laps < 1:
+            raise ConfigError(f"mission.laps: must be >= 1, got {self.laps}")
+        if self.waypoints and len(self.waypoints) % self.laps != 0:
+            raise ConfigError(
+                f"mission: expanded waypoints ({len(self.waypoints)}) is not "
+                f"divisible by laps ({self.laps}) — the plan is not a whole "
+                f"number of laps"
+            )
+
+    @property
+    def lap_waypoints(self) -> tuple[Waypoint, ...]:
+        """The authored lap pattern (one lap), derived from the plan."""
+        if not self.waypoints:
+            return ()
+        return self.waypoints[: len(self.waypoints) // self.laps]
 
 
 @dataclass(frozen=True)
@@ -359,10 +403,44 @@ def _parse_waypoint(raw: dict[str, Any], idx: int) -> Waypoint:
     )
 
 
+def _parse_laps(raw: dict[str, Any], ctx: str) -> int:
+    """Optional `laps`, defaulting to 1 (the pattern is the whole plan)."""
+    if "laps" not in raw:
+        return 1
+    value = raw["laps"]
+    # bool is an int subclass in Python; `laps: true` is a typo, not 1.
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(
+            f"{ctx}.laps: must be an integer, got {value!r}"
+        )
+    if value < 1:
+        raise ConfigError(f"{ctx}.laps: must be >= 1, got {value}")
+    return value
+
+
+def _reject_consecutive_duplicates(
+    plan: tuple[Waypoint, ...], ctx: str
+) -> None:
+    """Two identical adjacent items are a no-op for PX4 and always a bug.
+
+    The usual cause: a lap pattern that closes itself (ends where it
+    starts), so repeating it puts the same point twice at every seam.
+    Caught here rather than by eyeballing a trajectory afterwards.
+    """
+    for i in range(1, len(plan)):
+        if plan[i] == plan[i - 1]:
+            raise ConfigError(
+                f"{ctx}.waypoints: expanded plan items {i - 1} and {i} are "
+                f"identical ({plan[i]}). Consecutive duplicate waypoints do "
+                f"nothing; if this is a lap seam, drop the closing point "
+                f"from the lap pattern."
+            )
+
+
 def _parse_mission(raw: dict[str, Any]) -> MissionConfig:
     ctx = "mission"
     _require_keys(raw, {"type", "duration_sec", "waypoints"}, ctx)
-    _no_extra_keys(raw, {"type", "duration_sec", "waypoints"}, ctx)
+    _no_extra_keys(raw, {"type", "duration_sec", "waypoints", "laps"}, ctx)
 
     mission_type = _enum(str(raw["type"]), VALID_MISSION_TYPES, f"{ctx}.type")
     duration = float(raw["duration_sec"])
@@ -372,8 +450,18 @@ def _parse_mission(raw: dict[str, Any]) -> MissionConfig:
     wps_raw = raw["waypoints"]
     if not isinstance(wps_raw, list) or len(wps_raw) < 2:
         raise ConfigError(f"{ctx}.waypoints: need at least two")
-    waypoints = tuple(_parse_waypoint(w, i) for i, w in enumerate(wps_raw))
-    return MissionConfig(type=mission_type, duration_sec=duration, waypoints=waypoints)
+    lap = tuple(_parse_waypoint(w, i) for i, w in enumerate(wps_raw))
+
+    laps = _parse_laps(raw, ctx)
+    expanded = lap * laps
+    _reject_consecutive_duplicates(expanded, ctx)
+
+    return MissionConfig(
+        type=mission_type,
+        duration_sec=duration,
+        waypoints=expanded,
+        laps=laps,
+    )
 
 
 def _parse_telemetry_endpoint(raw: dict[str, Any], idx: int) -> TelemetryEndpointSpec:
@@ -471,4 +559,3 @@ def _load_yaml(path: Path) -> Any:
             return yaml.safe_load(f)
         except yaml.YAMLError as e:
             raise ConfigError(f"{path}: YAML parse error: {e}") from e
-
