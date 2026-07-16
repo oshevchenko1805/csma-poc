@@ -1136,3 +1136,200 @@ telemetry link).
 Pending: batch N=10 per arch for Ch.5 statistics; monitor_takeout
 (whole-domain kill) still available for the complementary A-SPOF /
 blast-radius result but NOT yet live-verified.
+---
+
+## OPEN-1 CLOSED — mission.laps; detection verified under motion (runs_v3)
+
+**Read this section before the older ones.** This file is an append-log:
+everything above is historical and some of it is superseded here. In
+particular, every "Test count: NNN passing" line above is a snapshot from
+its own session, not current.
+
+**Test count: 526 passing.** (446 → 512 → 526; the 446 in older sections
+is stale and has already caused one session to start from wrong numbers.)
+
+Committed: `a4745f9`.
+
+### What was wrong (the campaign blocker)
+
+The single-lap route finished at **t ≈ 57 s** while attacks fire at
+**t = 90 s**. Established from Gazebo ground-truth trajectory, uav_1:
+
+| t | state |
+|---|---|
+| 0 – 10.9 s | on ground (arm / pre-arm) |
+| 10.9 – 21 s | climb to 20 m |
+| 21 – 57 s | flying the square |
+| 57 – 161 s | hovering at home, v ≈ 0.03 m/s |
+
+Consequence: **runs_v1, runs_v2 and results R1-R4 all measured an attack
+on a HOVERING UAV**, not on one executing a mission. Mission resilience
+(thesis 3.4.5) was unmeasurable. Defensible only if stated in Ch.4 —
+indefensible if a reviewer finds it.
+
+### The fix — `mission.laps`
+
+New optional key in `configs/experiment.yaml`, parsed in `core/config.py`,
+default 1. The authored lap pattern is repeated `laps` times **at load
+time**; `MissionConfig.waypoints` remains the fully expanded plan, so
+`runners/mission_mavsdk.py` and `runners/experiment.py` are **untouched**
+and know nothing about laps. Config-only change; the one rule (§3) holds.
+
+`MissionConfig.lap_waypoints` is a property deriving the pattern from the
+plan (`waypoints[:len//laps]`) rather than a second stored copy — two
+copies of the same fact can disagree.
+
+Shipped: **`laps: 5`**, 4-corner square → 20-item plan.
+
+Sizing from measurement, not estimate:
+- lap ≈ 34 s (120 m perimeter, 5 m/s cruise, ≈3.5 m/s average with corner
+  deceleration)
+- motion from t ≈ 21 s to t ≈ 191 s
+- attack t = 90 s → lap 3, in motion — **verified on all three UAVs**
+  (v = 2.7–5.1 m/s)
+- observation ends t = 150 s → lap 4, in motion — **verified on all three**
+  (v = 1.5–5.0 m/s)
+
+4 laps clears the window by only ~8 s. `is_armable` (EKF/GPS convergence)
+varies run to run; 8 s would not survive a 1000+ trial campaign. 5 costs
+nothing — see next point.
+
+### Route length does NOT affect trial duration (verified)
+
+`MissionRunner.wait_until_complete()` **is never called** by
+`runners/experiment.py` — grep confirms only `duration_sec` appears, no
+call site. The runner sleeps `attack_at + observation_after_attack` and
+exits. Trial wall time: 160.7 s before the change, 160.5 s after.
+
+The mission deliberately does **not** complete inside a trial. That is
+what "attack on a mission in progress" requires. Do not "fix" this.
+
+Related: `mission.duration_sec: 300` appears to have **no consumer** — it
+is validated in `core/config.py` and never read elsewhere. Unconfirmed,
+low priority, noted so it is not mistaken for live behaviour.
+
+### Guards added (512 → 526, +14 tests in `tests/test_config.py`)
+
+- `laps` must be an integer ≥ 1 — rejects `2.5` (would truncate to 2 under
+  `int()`) and `true` (bool is an int subclass in Python)
+- **identical consecutive waypoints in the expanded plan are rejected.** A
+  self-closing lap (ends where it starts) produces one at every seam and
+  is a no-op for PX4. Previously catchable only by eyeballing a
+  trajectory. Non-adjacent revisits stay legal (figure-8).
+- `MissionConfig.__post_init__` enforces the invariants for hand-built
+  configs too (tests construct it directly), incl. `len(waypoints) % laps`
+- `test_experiment_mission_is_multi_lap` asserts the shipped config still
+  flies ≥ 4 laps — if anyone trims it back to one, a test fails instead of
+  a campaign silently collecting hover data again
+
+### runs_v3 — detection under motion (N=20, arch C, gps_spoofing)
+
+| Metric | value |
+|---|---|
+| Detection | **20/20** — Wilson 95% CI **[84%, 100%]** |
+| MTTD | 3.113 ± 0.677 s |
+| Impact scope | 1.00 ± 0.00 |
+| False positives | 0/20 |
+
+Always write "20/20, 95% CI [84%, 100%]", never a bare "100%".
+
+Two questions settled at once: detection is **not** an artefact of
+hovering, **and** the metrics did not break on the new route —
+`cross_check` does not fire falsely on genuinely moving neighbours.
+
+Dataset committed following the `runs_v1` convention: `run_summary.json`
+per run + `report/` (`.gitignore` has `*.jsonl`, so trajectory/merged
+logs stay local). `runs_v1` and `runs_v2` are validated datasets — **never
+write a new batch into them**; `run_batch.py --log-root` defaults to
+`runs_v1`, so always pass it explicitly.
+
+### Detector gradient — OPEN-3 (do not investigate with current data)
+
+| runs | detectors fired | MTTD |
+|---|---|---|
+| 19 of 20 | 3 | 2.58–3.28 s (mean 2.97, sd 0.22) |
+| r10 | 1 | 5.84 s |
+| `run_c_gps_spoofing_1784210522` (manual) | 0 | not detected |
+
+The N=20 sd is driven **entirely** by r10. 3 → 1 → 0 is a gradient, not a
+binary — so the one undetected run is the far end of a real distribution,
+not a glitch. Something in the ramp-onset signature varies run to run.
+**Cause unknown.**
+
+Excluding r10 is a post-hoc exclusion: report 3.113 ± 0.677 (N=20) as the
+headline, use the breakdown only to explain the sd.
+
+**Cannot be investigated yet**: `1784210522` contains zero security
+events — monitors log events, not raw telemetry, so there is nothing to
+inspect. Needs PX4 true-vs-believed position and the raw
+`pos_horiz_ratio` series from the instrumentation work. **Do not spend
+runs guessing at it first.**
+
+### Physical control case for R4 (extends the drift result)
+
+`1784210522` is the natural control: same attack, no detection, so nothing
+issued loiter.
+
+| | `208189` (detected, mttd 2.6) | `210522` (not detected) |
+|---|---|---|
+| t = 110 s | (29.8, 28.4) z = 20.3 | (−6.6, −29.1) **z = 0.5** |
+| t = 120 s | (30.0, −16.7) | (−80.9, −40.0) |
+| range | x[0..30] y[−20..30] | x[−83..30] y[−50..31] |
+
+Causality, stated correctly: the wild trajectory is a **consequence** of
+non-detection, not its cause. Detected → isolation → loiter → UAV stopped
+at ~20 m offset and held. Undetected → mission kept executing in a
+falsified frame → UAV thrown across the field, nearly touching ground.
+
+### RULED OUT — `SIM_GPS_OFF_N` does not leak via bson (OPEN-4)
+
+The natural hypothesis for `1784210522`: param leaking between runs via
+per-instance storage (`run_batch` clears
+`rootfs/{0,1,2}/parameters*.bson`, manual `run_one.py` does not).
+**Checked and false** — after a completed run only
+`parameters_backup.bson` exists, and `SIM_GPS_OFF_N` is in **none** of the
+three instances.
+
+This contradicts the rule stated earlier in this file (§"CRITICAL LESSON —
+per-instance param storage pollution") as established fact. Either that
+rule was never verified, or the behaviour changed. **Do not remove the
+cleanup on the strength of one observation** — it is harmless and
+`run_batch` does it anyway. But confirm or correct it before Ch.4 cites it
+as methodology. Tracked as OPEN-4 in `RESULTS_NOTES.md`.
+
+### MTTR is misnamed (raise in Ch.5, do not paper over)
+
+MTTR across runs_v3 = **0.015 ± 0.006 s**. 15 ms is not a recovery time —
+it is latency from decision to *issuing* the loiter command. Combined with
+R4 (loiter does not restore a safe state under an integrity attack), the
+metric measures **dispatch**, not recovery. The number is not wrong, the
+name is. Ch.5 needs the decomposition (dispatch latency vs actual
+restoration vs PX4 cold-start, per §8) rather than a headline
+"MTTR = 15 ms", which a reviewer will correctly attack.
+
+### Work queue (order matters)
+
+1. **Instrumentation — BEFORE the campaign, not after.** Omitting it means
+   re-running ~1160 trials.
+   - mission plan in `run_summary` — "was the UAV flying at attack time?"
+     must be machine-checkable per run. OPEN-1 was found by hand-reading a
+     trajectory; that must never be necessary again.
+   - PX4 true vs believed position + raw `pos_horiz_ratio` series →
+     unblocks OPEN-3
+   - mesh cost counters
+   - mesh loss/delay
+2. R2 (`monitor_takeout`) batch — still N=1 smoke. R1 already has N=10.
+3. OPEN-2 parametric sweeps (`RESULTS_NOTES.md`). `mission.laps` now makes
+   flight duration a single-number sweep axis.
+4. Full campaign, N=30/cell, with the statistics from OPEN-2.4.
+
+### Files touched this session
+
+- `core/config.py` — `laps`, expansion, validation, `lap_waypoints`
+- `tests/test_config.py` — `TestMissionLaps` (13) +
+  `test_experiment_mission_is_multi_lap`
+- `configs/experiment.yaml` — `laps: 5`, 4-point lap, sizing rationale in
+  comments
+- `RESULTS_NOTES.md` — R7 (OPEN-1 closed), R8 (detection under motion),
+  R4 extended, OPEN-3, OPEN-4, work queue
+- `runs_v3/` — 20 × `run_summary.json` + `report/`
