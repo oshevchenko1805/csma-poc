@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 
@@ -72,6 +72,27 @@ class MeshConfig:
     enabled: bool
     transport: str
     endpoints: dict[str, str]   # uav_id -> 'tcp://...'
+    # Channel degradation (instrumentation item 4). Defaults keep every
+    # existing config byte-identical: 0.0 loss, no seed. Only meaningful
+    # when the mesh is enabled (architecture C); the invariant check
+    # rejects loss_prob>0 on a disabled (noop) mesh.
+    loss_prob: float = 0.0
+    loss_seed: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.loss_prob <= 1.0:
+            raise ConfigError(
+                f"mesh.loss_prob: must be in [0.0, 1.0], got {self.loss_prob}"
+            )
+        # bool is an int subclass; `loss_seed: true` is a typo, not a seed.
+        if self.loss_seed is not None and (
+            isinstance(self.loss_seed, bool)
+            or not isinstance(self.loss_seed, int)
+        ):
+            raise ConfigError(
+                f"mesh.loss_seed: must be an integer or null, got "
+                f"{self.loss_seed!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -234,7 +255,11 @@ def _parse_monitor(raw: dict[str, Any], idx: int) -> MonitorSpec:
 def _parse_mesh(raw: dict[str, Any]) -> MeshConfig:
     ctx = "mesh"
     _require_keys(raw, {"enabled", "transport"}, ctx)
-    _no_extra_keys(raw, {"enabled", "transport", "endpoints"}, ctx)
+    _no_extra_keys(
+        raw,
+        {"enabled", "transport", "endpoints", "loss_prob", "loss_seed"},
+        ctx,
+    )
 
     enabled = bool(raw["enabled"])
     transport = _enum(str(raw["transport"]), VALID_MESH_TRANSPORTS, f"{ctx}.transport")
@@ -244,7 +269,19 @@ def _parse_mesh(raw: dict[str, Any]) -> MeshConfig:
         raise ConfigError(f"{ctx}.endpoints: must be a mapping uav_id -> tcp url")
     endpoints = {str(k): str(v) for k, v in endpoints_raw.items()}
 
-    return MeshConfig(enabled=enabled, transport=transport, endpoints=endpoints)
+    loss_prob = float(raw.get("loss_prob", 0.0))
+    # Pass loss_seed through untouched; MeshConfig.__post_init__ type-
+    # checks it (an int, or null). Coercing here would turn a float or
+    # bool into a silent seed.
+    loss_seed = raw.get("loss_seed", None)
+
+    return MeshConfig(
+        enabled=enabled,
+        transport=transport,
+        endpoints=endpoints,
+        loss_prob=loss_prob,
+        loss_seed=loss_seed,
+    )
 
 
 def _parse_recovery(raw: dict[str, Any]) -> RecoveryConfig:
@@ -299,6 +336,12 @@ def _validate_architecture_invariants(cfg: ArchitectureConfig) -> None:
     if not cfg.mesh.enabled and cfg.mesh.transport != "noop":
         raise ConfigError(
             f"mesh.enabled=false requires transport=noop, got {cfg.mesh.transport!r}"
+        )
+
+    if cfg.mesh.loss_prob > 0.0 and not cfg.mesh.enabled:
+        raise ConfigError(
+            "mesh.loss_prob>0 requires mesh.enabled=true — channel loss "
+            "only applies to the C mesh (A/B carry no mesh)"
         )
 
     if cfg.architecture == "A":
