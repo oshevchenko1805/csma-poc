@@ -1931,3 +1931,31 @@ Matched pair, arch C, gps_spoofing, target uav_0, SIM_GPS_OFF_N=50:
   validated runs_v1/runs_v3. Design them in a fresh chat.
 
 Do not launch the ~1160-run campaign until 3 and 4 are closed.
+## INSTRUMENTATION 3 CLOSED — mesh cost counters in run_summary
+
+Item 3. Tests 674->687. Two commits: b3a2c69 (counters in MeshBus),
+9837109 (fleet aggregation wired into RunResult.mesh_cost).
+
+MeshBus.mesh_counters(): per-topic msgs+bytes, split published (offered
+at this peer) vs delivered (frames on this peer's SUB). Counted on the
+frame, not per callback; incremented only after a successful send/decode;
+never reset by stop(). ABC default + NoOpMesh report zeros, so A/B carry
+zero mesh cost by construction (meshes=[]) — no architecture branch.
+"Bytes" = application frame (len(topic)+len(payload)), NOT TCP/IP
+overhead: a lower bound on wire cost, stated as such for Ch.4/5.
+
+metrics/mesh_cost.fleet_mesh_cost(): pure fold of per-peer snapshots ->
+{per_peer, fleet_total}. Empty list (A/B) -> all-zero aggregate.
+
+Live verification: run_c_none_1784294206, arch C, baseline, error=None.
+Fleet over 30 s observation: published 205 msgs / 54.5 kB, delivered
+410 / 109 kB, all on topic peer_position. delivered = 2 x published
+EXACTLY (full mesh of 3, each frame reaches 2 peers, zero loss on
+localhost); per-peer arithmetic closes too (uav_0 delivered 136 =
+69+67 from the other two). This confirms the counter is exact AND
+records the 0-loss baseline that item 4 will perturb: under loss,
+delivered drops below published x fanout. A/B = zero (by construction,
+unit-tested) — not re-flown.
+
+The "C detects" claim is now an engineering trade-off: detection costs
+~205 msgs / 55 kB per 30 s of idle mesh, A/B pay nothing.
