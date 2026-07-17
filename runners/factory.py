@@ -23,6 +23,26 @@ Dependency injection points
   handler. Pass an ExternalAwareProcessRunner when PX4 instances were
   launched out-of-band (live PoC pipeline via scripts/launch_px4.sh).
 
+Telemetry recording (OPEN-3)
+----------------------------
+Every monitor, in every architecture, records the raw ESTIMATOR_STATUS
+it feeds to its detectors, to `telemetry_<source>.jsonl` in the run
+directory. This is deliberately unconditional and not a config knob:
+~1 Hz x 160 s x 3 UAVs is ~480 lines per trial, and a switch is a thing
+that can be left off for the one run that mattered — which is exactly
+how OPEN-3 became unanswerable (RESULTS_NOTES R8: the undetected run
+holds zero security events, so nothing records what its detector saw).
+
+Wired identically for A, B and C. The recording is a property of a
+monitor, not of an architecture, so this introduces no asymmetry — the
+architectures still differ only in deployment (thesis 3.5.5).
+
+The filename is keyed on `source`, not on the watched UAV: in
+Architecture A several monitor entries could in principle watch the same
+UAV from different locations, and two EventLoggers appending to one file
+would interleave. `source` is already the key that makes `log_path`
+unique, so reusing it makes collisions impossible by the same argument.
+
 PX4 SITL defaults
 -----------------
 The RestartProcessHandler (Architecture C only) needs a ProcessSpec
@@ -90,6 +110,25 @@ ConnectionFactory = Callable[[str], object]
 
 MeshFactory = Callable[[str, list[str]], MeshBus]
 """(self_endpoint, peer_endpoints) -> MeshBus."""
+
+
+# ---------------------------------------------------------------------------
+# Telemetry recording
+# ---------------------------------------------------------------------------
+
+TELEMETRY_LOG_PREFIX: str = "telemetry_"
+"""Filename prefix for per-monitor raw telemetry logs.
+
+Owned here because the factory names the files, but the experiment
+runner must exclude them from merge_jsonl by exactly this prefix — pose
+and residual samples are not events and would drown merged.jsonl. One
+constant, two readers; a second copy could drift and silently poison the
+event stream the metrics layer reads.
+"""
+
+
+def _telemetry_log_path(log_dir: Path, source: str) -> Path:
+    return log_dir / f"{TELEMETRY_LOG_PREFIX}{source}.jsonl"
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +379,7 @@ def _build_arch_ab(
                 sysid=ep.sysid,
                 detectors=detectors,
                 log_path=log_dir / f"{source}.jsonl",
+                telemetry_log_path=_telemetry_log_path(log_dir, source),
                 isolation_decider=decider,
                 isolation_enforcer=enforcer,
                 failure_domain=spec.location,
@@ -440,6 +480,7 @@ def _build_arch_c(
             sysid=ep.sysid,
             detectors=detectors,
             log_path=log_dir / f"{source}.jsonl",
+            telemetry_log_path=_telemetry_log_path(log_dir, source),
             isolation_decider=decider,
             isolation_enforcer=enforcer,
             failure_domain=spec.location,

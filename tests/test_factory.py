@@ -34,7 +34,8 @@ from enforcement.isolation import (
     LocalIsolationEnforcer,
     MeshAnnouncingIsolationEnforcer,
 )
-from runners.factory import WiredFleet, build_fleet
+from runners.factory import TELEMETRY_LOG_PREFIX, WiredFleet, build_fleet
+from runners.monitor import DEFAULT_TELEMETRY_LOG_TYPES
 
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
@@ -317,3 +318,64 @@ class TestLogPaths:
         # Each monitor's logger writes to log_dir/<source>.jsonl
         for mon in fleet.monitors:
             assert (fleet.log_dir / f"{mon._source}.jsonl").parent == fleet.log_dir
+
+
+# ---------------------------------------------------------------------------
+# Telemetry recording wiring (OPEN-3)
+#
+# The channel is only useful if it is on for every run of every
+# architecture. A knob that can be left off for the one run that mattered
+# is how OPEN-3 became unanswerable in the first place.
+# ---------------------------------------------------------------------------
+
+
+class TestTelemetryLogWiring:
+    @pytest.mark.parametrize("arch", ["a", "b", "c"])
+    def test_every_monitor_records(self, arch: str, tmp_path: Path):
+        fleet = _build(arch, tmp_path, mesh_factory=lambda *a: RecordingMesh())
+        for mon in fleet.monitors:
+            assert mon._telemetry_logger is not None
+            assert mon._telemetry_logger.path.parent == fleet.log_dir
+            assert mon._telemetry_logger.path.name.startswith(
+                TELEMETRY_LOG_PREFIX
+            )
+
+    @pytest.mark.parametrize("arch", ["a", "b", "c"])
+    def test_paths_are_unique_per_monitor(self, arch: str, tmp_path: Path):
+        # Two EventLoggers appending to one file would interleave and
+        # corrupt the series. Keyed on `source`, which is already the key
+        # that makes log_path unique.
+        fleet = _build(arch, tmp_path, mesh_factory=lambda *a: RecordingMesh())
+        paths = [m._telemetry_logger.path for m in fleet.monitors]
+        assert len(set(paths)) == len(paths) == 3
+
+    @pytest.mark.parametrize("arch", ["a", "b", "c"])
+    def test_telemetry_file_is_not_the_event_log(self, arch: str, tmp_path: Path):
+        # merged.jsonl is built from the event logs; telemetry must be a
+        # separate file so it can be excluded from the merge.
+        fleet = _build(arch, tmp_path, mesh_factory=lambda *a: RecordingMesh())
+        for mon in fleet.monitors:
+            assert mon._telemetry_logger.path != mon._logger.path
+
+    @pytest.mark.parametrize("arch", ["a", "b", "c"])
+    def test_records_estimator_status_by_default(self, arch: str, tmp_path: Path):
+        # pos_horiz_ratio lives in ESTIMATOR_STATUS; without it OPEN-3
+        # stays unanswerable.
+        fleet = _build(arch, tmp_path, mesh_factory=lambda *a: RecordingMesh())
+        for mon in fleet.monitors:
+            assert mon.telemetry_log_types == DEFAULT_TELEMETRY_LOG_TYPES
+            assert "ESTIMATOR_STATUS" in mon.telemetry_log_types
+
+    def test_wiring_is_identical_across_architectures(self, tmp_path: Path):
+        # Recording is a property of a monitor, not of an architecture.
+        # An asymmetry here would break the identical-measurement-
+        # procedure requirement (thesis 3.5.5) at the source.
+        per_arch = {}
+        for arch in ("a", "b", "c"):
+            fleet = _build(
+                arch, tmp_path / arch, mesh_factory=lambda *a: RecordingMesh()
+            )
+            per_arch[arch] = {
+                m.uav_id: m.telemetry_log_types for m in fleet.monitors
+            }
+        assert per_arch["a"] == per_arch["b"] == per_arch["c"]

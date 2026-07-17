@@ -7,6 +7,7 @@ runs end-to-end in seconds without PX4.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -41,6 +42,61 @@ class FakeConnection:
 
 def _fake_conn_factory(_endpoint: str) -> FakeConnection:
     return FakeConnection()
+
+
+class FakeMessage:
+    def __init__(self, type_name: str, sysid: int, fields: dict):
+        self._type = type_name
+        self._sysid = sysid
+        self._fields = dict(fields)
+
+    def get_type(self): return self._type
+    def get_srcSystem(self): return self._sysid
+    def to_dict(self): return dict(self._fields)
+
+
+class EstimatorConnection:
+    """Emits a steady ESTIMATOR_STATUS stream for one UAV.
+
+    The default FakeConnection returns nothing, so no telemetry ever
+    reaches the detectors and the residual series would be empty — which
+    would make the estimator_series tests below vacuously pass. This one
+    produces the message that actually carries pos_horiz_ratio.
+
+    `sysid` must match the listener's expected_sysid or the listener
+    filters everything out; the factory below reads it from the real
+    config rather than parsing the endpoint string.
+    """
+
+    def __init__(self, *, sysid: int, ratio: float) -> None:
+        self._sysid = sysid
+        self._ratio = ratio
+        self._closed = False
+        self._lock = threading.Lock()
+        self.sent = 0
+
+    def recv_match(self, type=None, blocking: bool = True, timeout: float = 1.0):
+        if self._closed:
+            return None
+        allowed = None
+        if type is not None:
+            allowed = {type} if isinstance(type, str) else set(type)
+        if allowed is not None and "ESTIMATOR_STATUS" not in allowed:
+            time.sleep(min(timeout, 0.05))
+            return None
+        # Pace roughly like PX4 SITL rather than spinning: a few dozen
+        # samples across a sub-second test run is plenty.
+        time.sleep(0.02)
+        with self._lock:
+            self.sent += 1
+        return FakeMessage(
+            "ESTIMATOR_STATUS",
+            self._sysid,
+            {"pos_horiz_ratio": self._ratio, "vel_ratio": 0.31},
+        )
+
+    def close(self) -> None:
+        self._closed = True
 
 
 def _noop_mesh_factory(_self_ep, _peer_eps) -> NoOpMesh:
@@ -93,9 +149,22 @@ def _make_runner(
     attack_at: float = 0.1,
     obs_after: float = 0.2,
     target_uav: str | None = None,
+    estimator_ratio: float | None = None,
 ) -> ExperimentRunner:
     arch_cfg = load_architecture_config(CONFIG_DIR / f"architecture_{arch}.yaml")
     exp_cfg = load_experiment_config(CONFIG_DIR / "experiment.yaml")
+
+    conn_factory = _fake_conn_factory
+    if estimator_ratio is not None:
+        sysid_by_endpoint = {
+            e.endpoint: e.sysid for e in exp_cfg.telemetry.endpoints
+        }
+
+        def conn_factory(endpoint: str):  # noqa: F811
+            return EstimatorConnection(
+                sysid=sysid_by_endpoint[endpoint], ratio=estimator_ratio
+            )
+
     return ExperimentRunner(
         arch_cfg=arch_cfg,
         exp_cfg=exp_cfg,
@@ -106,7 +175,7 @@ def _make_runner(
         target_uav=target_uav,
         attack_at_sec=attack_at,
         observation_after_attack_sec=obs_after,
-        connection_factory=_fake_conn_factory,
+        connection_factory=conn_factory,
         mesh_factory=_noop_mesh_factory,
     )
 
@@ -552,15 +621,6 @@ class TestFlightAtAttack:
 
     def test_flight_check_never_fails_a_run(self, tmp_path: Path):
         # A summary field is not worth losing a 160 s flight over.
-        class ExplodingRecorder(FakeFlyingRecorder):
-            @property
-            def stats(self):  # type: ignore[override]
-                return {"samples_written": 1}
-
-            @stats.setter
-            def stats(self, _v):
-                pass
-
         runner = _make_runner(tmp_path, "a", attack=RecordingInjector())
         runner._trajectory_recorder_factory = lambda p: FakeFlyingRecorder(p)
         runner._compute_flight_at_attack = lambda _d: (_ for _ in ()).throw(
@@ -571,4 +631,129 @@ class TestFlightAtAttack:
         assert result.error is not None
         assert "flight_check" in result.error
         # The run itself still produced its logs.
+        assert Path(result.merged_log).exists()
+
+
+# ---------------------------------------------------------------------------
+# Raw EKF residual series (OPEN-3)
+#
+# Monitors log events, not telemetry, so a detector that never fires
+# leaves no trace of what it saw — which is why OPEN-3 cannot be answered
+# from the runs on disk. run_summary.json is the only committed artefact,
+# so the evidence has to reach it.
+# ---------------------------------------------------------------------------
+
+
+class TestEstimatorSeries:
+    def test_series_recorded_per_uav(self, tmp_path: Path):
+        result = _make_runner(
+            tmp_path, "c", attack=RecordingInjector(), estimator_ratio=1.5
+        ).run()
+        es = result.estimator_series
+        assert es is not None
+        assert set(es["uavs"]) == {"uav_0", "uav_1", "uav_2"}
+        assert es["target_uav"] == "uav_0"
+        assert es["msg_type"] == "ESTIMATOR_STATUS"
+        assert es["uavs"]["uav_0"]["n"] > 0
+
+    def test_breach_is_visible_in_the_series(self, tmp_path: Path):
+        # The discriminator OPEN-3 needs: a sustained breach means the
+        # signature was present, so a non-detection would be a sustain-rule
+        # question rather than an injection question.
+        result = _make_runner(
+            tmp_path, "b", attack=RecordingInjector(), estimator_ratio=1.5
+        ).run()
+        u = result.estimator_series["uavs"]["uav_0"]
+        assert u["peak"] == pytest.approx(1.5)
+        assert u["n_above_threshold"] > 0
+        assert u["max_consecutive_above"] > 0
+
+    def test_quiet_run_shows_no_breach(self, tmp_path: Path):
+        # The other side of the discriminator: the ratio never crossed, so
+        # the injection produced no signature at all.
+        result = _make_runner(
+            tmp_path, "b", attack=RecordingInjector(), estimator_ratio=0.006
+        ).run()
+        u = result.estimator_series["uavs"]["uav_0"]
+        assert u["n_above_threshold"] == 0
+        assert u["max_consecutive_above"] == 0
+        assert u["first_cross_t_rel_sec"] is None
+
+    def test_anchored_to_the_injection_instant(self, tmp_path: Path):
+        # Monitors start before the attack, so the series must straddle
+        # t=0. A baseline-free series cannot show a ramp onset.
+        result = _make_runner(
+            tmp_path, "a", attack=RecordingInjector(), estimator_ratio=0.5
+        ).run()
+        es = result.estimator_series
+        t_rel = es["uavs"]["uav_0"]["t_rel_sec"]
+        assert min(t_rel) < 0.0
+        assert max(t_rel) > 0.0
+        assert es["attack_at_wall"] == pytest.approx(
+            es["attack_at_wall"], abs=0.0
+        )
+
+    def test_recorded_on_baseline_too(self, tmp_path: Path):
+        result = _make_runner(tmp_path, "a", estimator_ratio=0.006).run()
+        assert result.attack_name == "none"
+        assert result.estimator_series["uavs"]["uav_0"]["n"] > 0
+
+    @pytest.mark.parametrize("arch", ["a", "b", "c"])
+    def test_recorded_in_every_architecture(self, arch: str, tmp_path: Path):
+        result = _make_runner(
+            tmp_path, arch, attack=RecordingInjector(), estimator_ratio=1.5
+        ).run()
+        assert set(result.estimator_series["uavs"]) == {
+            "uav_0", "uav_1", "uav_2"
+        }
+
+    def test_telemetry_logs_excluded_from_merged(self, tmp_path: Path):
+        # ~1 Hz x 160 s x 3 UAVs of raw MAVLink would bury the event
+        # stream the metrics layer reads.
+        result = _make_runner(
+            tmp_path, "a", attack=RecordingInjector(), estimator_ratio=1.5
+        ).run()
+        log_dir = Path(result.log_dir)
+        telemetry_files = sorted(log_dir.glob("telemetry_*.jsonl"))
+        assert len(telemetry_files) == 3
+        assert sum(len(p.read_text().splitlines()) for p in telemetry_files) > 0
+
+        merged = read_jsonl(Path(result.merged_log))
+        assert all(e.event_type != "telemetry" for e in merged)
+
+    def test_no_anchor_means_no_series(self, tmp_path: Path):
+        # arm() raises before the injection instant is captured, so there
+        # is no t=0 to anchor to and no series can be honestly reported.
+        result = _make_runner(
+            tmp_path,
+            "a",
+            attack=RecordingInjector(arm_raises=True),
+            estimator_ratio=1.5,
+        ).run()
+        assert result.estimator_series is None
+        assert result.flight_at_attack is None
+
+    def test_in_summary_json(self, tmp_path: Path):
+        result = _make_runner(
+            tmp_path, "a", attack=RecordingInjector(), estimator_ratio=1.5
+        ).run()
+        data = json.loads(
+            (Path(result.log_dir) / "run_summary.json").read_text()
+        )
+        es = data["estimator_series"]
+        assert es["threshold"] == 1.0
+        assert es["uavs"]["uav_0"]["peak"] == 1.5
+        assert isinstance(es["uavs"]["uav_0"]["pos_horiz_ratio"], list)
+
+    def test_series_never_fails_a_run(self, tmp_path: Path):
+        runner = _make_runner(
+            tmp_path, "a", attack=RecordingInjector(), estimator_ratio=1.5
+        )
+        runner._compute_estimator_series = lambda _d: (_ for _ in ()).throw(
+            RuntimeError("boom")
+        )
+        result = runner.run()
+        assert result.estimator_series is None
+        assert result.error is not None
+        assert "estimator_series" in result.error
         assert Path(result.merged_log).exists()

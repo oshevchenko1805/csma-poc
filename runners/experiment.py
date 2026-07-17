@@ -38,25 +38,32 @@ Teardown order matters twice over:
     coordinators, then meshes. Reversing that can deadlock if a
     coordinator tries to publish a final ack into a stopped mesh.
 
-Self-describing runs (mission_plan / flight_at_attack)
-------------------------------------------------------
-`run_summary.json` also carries what route was flown and what the UAVs
-were physically doing at the injection instant (Gazebo ground truth).
+Self-describing runs
+--------------------
+`run_summary.json` carries three things beyond counters, all for the
+same reason: `*.jsonl` is gitignored, so the summary is the only
+artefact that gets committed. A question that cannot be answered from it
+cannot be answered at all once the run directory is gone — and both
+OPEN-1 and OPEN-3 are exactly that failure.
 
-Both exist because runs_v1, runs_v2 and results R1-R4 attacked a
-HOVERING UAV for 120 trials and nothing in the pipeline recorded enough
-to notice: the answer was recoverable only by hand-reading a trajectory,
-so it was asked once, late (RESULTS_NOTES OPEN-1 / R7). On the
-~1160-trial campaign that failure mode is silent and unrepeatable, so a
-run now states its own validity rather than leaving it to be
-reconstructed.
+  mission_plan       what route was flown (laps, waypoints, timing)
+  flight_at_attack   what the UAVs were physically doing at injection,
+                     from Gazebo ground truth (OPEN-1 / R7: 120 trials
+                     attacked a hovering UAV and nothing said so)
+  estimator_series   the raw EKF residuals the detectors saw (OPEN-3 /
+                     R8: the undetected run holds zero security events,
+                     so nothing records what its detector saw)
 
-Neither fact can be looked up afterwards: `*.jsonl` is gitignored, and
-`configs/experiment.yaml` drifts under the OPEN-2 sweeps. They have to
-travel with the run.
+All three are computed from data the runner already had. None branches
+on architecture, so the identical-measurement-procedure requirement
+(thesis 3.5.5, table 3.14) holds by construction.
 
-Nothing here branches on architecture, so the identical-measurement-
-procedure requirement (thesis 3.5.5, table 3.14) holds by construction.
+Note the asymmetry in what they are FOR: flight_at_attack comes from
+Gazebo, outside the system under test, and is metric-grade.
+estimator_series comes from the monitors, inside it — under
+monitor_takeout it dies with them, so its availability is
+architecture-dependent and it is diagnostic only. Nothing in table 3.13
+may be computed from it.
 """
 
 from __future__ import annotations
@@ -73,12 +80,17 @@ from core.config import ArchitectureConfig, ExperimentConfig
 from core.events import AttackEvent
 from core.logger import EventLogger, merge_jsonl
 from enforcement.handlers import ProcessRunner
+from metrics.estimator_series import (
+    estimator_series as build_estimator_series,
+    read_telemetry,
+)
 from metrics.flight_check import (
     flight_state_at,
     mission_plan_summary,
     read_trajectory,
 )
 from runners.factory import (
+    TELEMETRY_LOG_PREFIX,
     ConnectionFactory,
     MeshFactory,
     WiredFleet,
@@ -118,6 +130,9 @@ class RunResult:
     flight_at_attack: Optional[dict[str, Any]] = None
     """Physical state of every UAV at the injection instant, from Gazebo
     poses. None means NOT OBSERVED (no recorder) — never "not flying"."""
+    estimator_series: Optional[dict[str, Any]] = None
+    """Raw EKF residual series per UAV, anchored to the injection
+    instant. Diagnostic, not metric-grade — see module docstring."""
     error: Optional[str] = None
 
 
@@ -175,7 +190,7 @@ class ExperimentRunner:
         self._attack_fired_wall: Optional[float] = None
         """Wall clock of the injection instant. Stays None if the run
         never reached it (setup failure) — which is why the flight check
-        then reports None instead of a verdict."""
+        and the residual series then report None instead of a verdict."""
 
     # ----- public entry point -----
 
@@ -234,9 +249,9 @@ class ExperimentRunner:
     # ----- setup -----
 
     def _resolve_target(self) -> str:
-        """The UAV under attack. One definition, used by both the scenario
-        and the flight check — two copies of this rule could disagree and
-        silently validate the wrong vehicle."""
+        """The UAV under attack. One definition, used by the scenario and
+        by both post-hoc checks — separate copies of this rule could
+        disagree and silently describe the wrong vehicle."""
         return self._target_uav or self._exp_cfg.telemetry.endpoints[0].uav_id
 
     def _setup_fleet(self) -> None:
@@ -344,11 +359,12 @@ class ExperimentRunner:
         await asyncio.sleep(self._attack_at)
 
         # The injection instant, on the same wall clock as merged.jsonl
-        # events and trajectory.jsonl samples. Captured here, not derived
-        # later: fire() can block (a param set is a network round trip),
-        # and this is the axis the flight check anchors to. Set on
-        # baseline too — the nominal instant is what lets the control
-        # condition be checked by the identical procedure (thesis 3.5.5).
+        # events, trajectory.jsonl samples and the telemetry logs.
+        # Captured here, not derived later: fire() can block (a param set
+        # is a network round trip), and this is the axis both post-hoc
+        # checks anchor to. Set on baseline too — the nominal instant is
+        # what lets the control condition be checked by the identical
+        # procedure (thesis 3.5.5).
         self._attack_fired_wall = time.time()
 
         # Ground-truth marker BEFORE fire: pin "attack injection started"
@@ -392,7 +408,10 @@ class ExperimentRunner:
     def _teardown_fleet(self) -> None:
         if self._fleet is None:
             return
-        # Reverse start order: monitors -> coordinators -> meshes
+        # Reverse start order: monitors -> coordinators -> meshes.
+        # Monitor.stop() also closes its telemetry log, which _finalize
+        # reads back — so the residual series must never be computed
+        # before this.
         for mon in self._fleet.monitors:
             try:
                 mon.stop()
@@ -445,6 +464,25 @@ class ExperimentRunner:
             target_uav=self._resolve_target(),
         )
 
+    def _compute_estimator_series(
+        self, log_dir: Path
+    ) -> Optional[dict[str, Any]]:
+        """Fold every monitor's raw telemetry log into one series set.
+
+        One file per monitor, each holding only its own UAV's samples, so
+        concatenating them and grouping by uav_id inside the events is
+        lossless. A monitor killed mid-run simply contributes fewer
+        samples — which is itself the observation, not an error.
+        """
+        samples: list[dict[str, Any]] = []
+        for path in sorted(log_dir.glob(f"{TELEMETRY_LOG_PREFIX}*.jsonl")):
+            samples.extend(read_telemetry(path))
+        return build_estimator_series(
+            samples,
+            self._attack_fired_wall,
+            target_uav=self._resolve_target(),
+        )
+
     def _finalize(self, error: Optional[str]) -> RunResult:
         duration = time.time() - self._start_wall if self._start_wall else 0.0
 
@@ -480,27 +518,36 @@ class ExperimentRunner:
         # Merge all per-component logs in the run directory.
         sources = sorted(log_dir.glob("*.jsonl"))
         # Exclude the merged file itself in case of re-runs.
-        # trajectory.jsonl holds pose samples, not events — merging it
-        # would pollute merged.jsonl and break the event readers.
+        # trajectory.jsonl holds pose samples and telemetry_*.jsonl holds
+        # raw MAVLink — neither is an event stream. Merging them would
+        # bury the events the metrics layer reads under thousands of
+        # samples.
         sources = [
             p
             for p in sources
             if p.name not in ("merged.jsonl", TRAJECTORY_FILENAME)
+            and not p.name.startswith(TELEMETRY_LOG_PREFIX)
         ]
         try:
             merge_jsonl(sources, merged_path)
         except Exception as exc:
             error = error or f"merge: {exc}"
 
-        # A post-hoc read of an already-finished flight. A defect here
+        # Post-hoc reads of an already-finished flight. A defect here
         # surfaces in `error` rather than raising: the flight happened and
-        # its logs are on disk, so losing a real run over a bad summary
-        # field would be the expensive failure — same contract as merge.
+        # its logs are on disk, so losing a real run over a summary field
+        # would be the expensive failure — same contract as merge.
         flight_at_attack: Optional[dict[str, Any]] = None
         try:
             flight_at_attack = self._compute_flight_at_attack(log_dir)
         except Exception as exc:
             error = error or f"flight_check: {exc}"
+
+        estimator_series: Optional[dict[str, Any]] = None
+        try:
+            estimator_series = self._compute_estimator_series(log_dir)
+        except Exception as exc:
+            error = error or f"estimator_series: {exc}"
 
         monitor_stats = [m.stats for m in self._fleet.monitors]
         coordinator_stats = [c.stats for c in self._fleet.coordinators]
@@ -522,6 +569,7 @@ class ExperimentRunner:
             ),
             mission_plan=mission_plan,
             flight_at_attack=flight_at_attack,
+            estimator_series=estimator_series,
             error=error,
         )
 

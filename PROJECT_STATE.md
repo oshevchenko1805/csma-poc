@@ -1447,3 +1447,185 @@ Clean solution. No workarounds.
 Items 2-4: raw `pos_horiz_ratio` series + PX4 true vs believed position
 (unblocks OPEN-3), mesh cost counters, mesh loss/delay. Do not launch the
 ~1160-run campaign until these are closed.
+
+## INSTRUMENTATION 2A CLOSED — raw estimator series in run_summary
+
+Item 2, first half (raw `pos_horiz_ratio` series). Tests 576 -> 644.
+Item 2B (true-vs-believed divergence) is NOT done — see end of block.
+
+### What it answers
+
+OPEN-3 was unanswerable, not merely unanswered: monitors log events, not
+telemetry. `GpsSpoofingDetector` sees `pos_horiz_ratio` in every
+ESTIMATOR_STATUS and emits nothing unless it fires, so the undetected run
+(`run_c_gps_spoofing_1784210522`) contains zero security events. There was
+literally nothing to inspect.
+
+A non-detection has exactly two causes, and they are distinguishable:
+
+  n_above_threshold == 0        the ratio never crossed -> the injection
+                                produced no signature. Detection rate is
+                                then a property of the ATTACK, not the
+                                architecture: threats-to-validity.
+  max_consecutive_above < 3     it crossed but never sustained -> the
+                                signature existed and the sustain rule
+                                rejected it: a detector-tuning finding.
+
+`max_consecutive_above` is the discriminator. Both readings are honest
+and publishable; guessing between them is not.
+
+### Added
+
+- `metrics/estimator_series.py` — pure functions, no I/O in the
+  computation: `estimator_series()`, tolerant `read_telemetry()`.
+  Reproduces the detector's sustain rule over a recorded series.
+- `Monitor(telemetry_log_path=..., telemetry_log_types=...)` — replaces
+  the dead `log_telemetry: bool` flag (present in the signature, never
+  passed by `factory.py`, never enabled in any real run).
+- `runners/factory.py`: `TELEMETRY_LOG_PREFIX`, every monitor in every
+  architecture gets `telemetry_<source>.jsonl`.
+- `RunResult.estimator_series`, folded from all monitors' telemetry logs.
+
+### Decisions
+
+- **Why not reuse `log_telemetry`.** It wrote into the monitor's
+  `log_path`, which `merge_jsonl` folds into `merged.jsonl` — drowning
+  the event stream the metrics layer reads. It also sat BEFORE the
+  detectors, i.e. on the path to `SecurityEvent`, so its I/O would have
+  been added to MTTD: instrumentation upstream of the measurement changes
+  the measurement. Recording now happens AFTER the detector loop, into
+  its own file, excluded from the merge by prefix.
+- **No config knob; on for every run of every architecture.** ~480
+  ESTIMATOR_STATUS lines per trial. A switch is a thing that can be left
+  off for the one run that mattered — which is exactly how OPEN-3 became
+  unanswerable.
+- **Filename keyed on `source`, not `uav_id`.** In Architecture A several
+  monitor entries could watch one UAV from different locations; two
+  EventLoggers appending to one file would interleave. `source` already
+  makes `log_path` unique, so collisions are impossible by the same
+  argument.
+- **Threshold duplicated, not imported** from `detectors.gps`: this
+  module describes what the data did and must stay readable if the
+  detector is retuned. A silent divergence would make every recorded
+  breach count describe a detector that does not exist, so
+  `test_default_threshold_matches_the_detector` compares them directly.
+  Duplication yes; blind duplication no.
+- **Strict `>`, and a gap breaks a run of breaches** — mirrors the
+  detector exactly. `>=` would report breaches the detector never saw; a
+  missing sample is not one it could have counted toward sustain.
+- **`bool` rejected explicitly**: it is an int subclass in Python, so a
+  stray `True` would become 1.0, sitting exactly at the threshold.
+- **Baseline is median, not mean**, over pre-injection samples only.
+- **Series in `run_summary.json`, not only in .jsonl.** `*.jsonl` is
+  gitignored, which is precisely why OPEN-3 is unanswerable for runs
+  already on disk. Measured cost: 17.4 kB per summary (arch C, 3 UAVs)
+  -> ~20 MB for the full ~1160-run campaign. Acceptable.
+
+### Scope — diagnostic, NOT a metric source
+
+The series is produced by monitors, inside the system under test. An
+outside tap would need a 4th mavlink-router endpoint, which breaks MAVSDK
+PARAM_SET routing (step 10e, blocker 2). So under `monitor_takeout` the
+series dies with the monitor: its availability is architecture-dependent
+and NOTHING in table 3.13 may be computed from it (thesis 3.5.5, 3.5.4).
+It is for explaining mechanisms in Ch.4/5 and for OPEN-3. Metric-grade
+ground truth stays with Gazebo (`metrics/flight_check.py`).
+
+Under `detector_takeout` the opposite holds and is useful:
+`disable_local_detectors()` empties the detector list but the listener
+survives, so the series shows what the silenced detector WOULD have seen
+— R5's mechanism, not only its outcome.
+
+### Live verification
+
+`runs/run_c_gps_spoofing_1784270714`, arch C, gps_spoofing, target uav_0.
+
+    MTTD 3.276 s, detected, impact_scope 1, flying at inject: True
+    uav_0: rate_hz 0.9855, n 159, baseline_median 0.0104
+           peak 2.0 @ t_rel +1.278, n_above 6, max_consecutive 6
+           first_cross +1.278
+
+MTTD unmoved against the runs_v3 baseline (3.113 +/- 0.677, range of the
+19 detecting runs 2.58-3.28), so recording after the detectors did what
+it was supposed to. See RESULTS_NOTES R9 for what the series revealed.
+
+### 3-channel recording (for 2B)
+
+Measured live on this build (`smoke_telemetry.py`, uav_0):
+
+    ESTIMATOR_STATUS      0.9 Hz    pos_horiz_ratio (the residual)
+    LOCAL_POSITION_NED   29.4 Hz    what PX4 BELIEVES  <- 2B
+    GPS_RAW_INT          29.8 Hz    the GPS input, i.e. the spoof itself
+    GLOBAL_POSITION_INT  49.1 Hz    not recorded
+    ATTITUDE             97.6 Hz    not recorded
+
+All three are now in `DEFAULT_TELEMETRY_LOG_TYPES`. The two 30 Hz
+channels cost ~14k samples per trial per UAV (~2.8 MB of gitignored
+.jsonl). Recorded now, because changing this before the campaign costs
+160 s and after it costs weeks.
+
+Together they close the triangle: truth (Gazebo) -> falsified input
+(GPS_RAW_INT) -> belief (LOCAL_POSITION_NED). `pos_horiz_ratio` is
+precisely the residual between input and prediction, so the triangle
+should explain the one-sample collapse in R9. Note GPS_RAW_INT is
+geodetic (lat/lon in 1e7 deg): comparing it to NED metres needs the EKF
+origin. That it carries the SIM_GPS_OFF_N offset is a HYPOTHESIS (GZBridge
+generates the simulated GPS) — unverified until a baseline and an attack
+run are compared.
+
+### AXIS CALIBRATION — measured, and it refuted the hypothesis
+
+**Gazebo world is standard ENU: x = EAST, y = NORTH.**
+
+    ned.x (north) = gz.y
+    ned.y (east)  = gz.x
+    ned.z (down)  = -gz.z        (gz.z ~ +20 -> ned.z ~ -20, confirmed)
+
+Measured on `runs/run_c_none_1784272577` (baseline: no attack, so belief
+== truth, which is the only condition where an axis mismatch is
+distinguishable from a working spoof). 4383 paired samples above 5 m:
+
+    H2  gz.y=north, gz.x=east : mean err 0.356 m   <- correct
+    H1  gz.x=north, gz.y=east : mean err 27.797 m  <- refuted
+
+H1 was the standing hypothesis, argued from a runs_v3 sample
+(`x=27.56, y=0.54` against waypoint `north=30, east=0`) and from
+`PX4_GZ_MODEL_POSE = instance*5,0,0` spacing the fleet "along +X". Both
+were reasoning, not measurement, and both were wrong. The square route is
+symmetric under an axis swap, so runs_v3 CANNOT settle this — only
+LOCAL_POSITION_NED can, because its frame is fixed by the MAVLink spec
+rather than by convention.
+
+**No code changed.** Nothing maps gz x/y to compass directions:
+`flight_check` uses `hypot(dx, dy)` (axis-name independent) and
+`alt_m = z` was verified separately and stands. The error was in the
+hypothesis, not the repository. This is the second axis assumption in
+this work that turned out to contradict the "obvious" convention — do not
+reason about frames, measure them.
+
+**Consequence for 2B: the fleet is spaced along EAST, not north.**
+`PX4_GZ_MODEL_POSE = instance*5,0,0` is gz X = east, so EKF origins sit at
+gz (0,0), (5,0), (10,0) for uav_0/1/2. NED origin is EKF start, NOT the
+Gazebo world origin — subtract that offset or a healthy uav_1 reads 5 m
+of divergence.
+
+**The 0.356 m is NOT the EKF noise floor.** Gazebo records at 4.6 Hz and
+NED at 30 Hz; the pairing used a +/-0.2 s tolerance, which at ~4 m/s
+allows up to 0.8 m of pure time-alignment error. Most of the 0.356 m is
+that artefact. True estimation error is smaller, and proper interpolation
+will do better. Either way the spoof injects 50 m, so divergence is
+comfortably measurable.
+
+Also confirmed by the same run: the fleet flies the configured square
+correctly — NED track (0,0) -> (30,0) -> (30,30) -> (0,30) -> (0,0),
+altitude held at 20 m +/- 0.2. Nothing flies crooked.
+
+### Remaining
+
+- **2B**: true-vs-believed divergence into `run_summary` at ~1 Hz (a pair
+  is rate-limited by its slower side; the Gazebo recorder runs at 4.6 Hz).
+  Raw channels are already being recorded, so no re-flying is needed.
+- **3**: mesh cost counters.
+- **4**: mesh loss/delay.
+
+Do not launch the ~1160-run campaign until these are closed.

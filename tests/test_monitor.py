@@ -29,7 +29,7 @@ from detectors.command import CommandInjectionDetector
 from detectors.cross_check import CrossCheckDetector
 from detectors.heartbeat import HeartbeatDetector
 from enforcement.isolation import LocalIsolationEnforcer
-from runners.monitor import Monitor
+from runners.monitor import DEFAULT_TELEMETRY_LOG_TYPES, Monitor
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +101,8 @@ def _make_monitor(
     *,
     detectors: list,
     conn: Optional[FakeConnection] = None,
-    log_telemetry: bool = False,
+    telemetry_log_path: Optional[Path] = None,
+    telemetry_log_types: Optional[list] = None,
     tick_period_sec: float = 0.1,
     isolation_decider: Optional[IsolationDecider] = None,
     isolation_enforcer: Optional[LocalIsolationEnforcer] = None,
@@ -117,10 +118,21 @@ def _make_monitor(
         detectors=detectors,
         log_path=log_path,
         tick_period_sec=tick_period_sec,
-        log_telemetry=log_telemetry,
+        telemetry_log_path=telemetry_log_path,
+        telemetry_log_types=telemetry_log_types,
         isolation_decider=isolation_decider,
         isolation_enforcer=isolation_enforcer,
         _telemetry_connection=conn,
+    )
+
+
+def _estimator_msg(ratio: float = 0.006, vel_ratio: float = 0.31) -> FakeMessage:
+    """Mimics PX4's ESTIMATOR_STATUS — the message carrying the EKF
+    residual GpsSpoofingDetector fires on."""
+    return FakeMessage(
+        "ESTIMATOR_STATUS",
+        1,
+        {"pos_horiz_ratio": ratio, "vel_ratio": vel_ratio},
     )
 
 
@@ -338,40 +350,220 @@ class TestMultipleDetectors:
 
 
 # ---------------------------------------------------------------------------
-# Telemetry logging mode
+# Telemetry recording (OPEN-3)
+#
+# Monitors log events, not telemetry — so a detector that never fires
+# leaves no trace of what it saw. That is why OPEN-3 cannot be answered
+# from the runs already on disk (RESULTS_NOTES R8: the undetected run
+# contains zero security events). These tests pin the three properties
+# that make the recording channel usable rather than harmful.
 # ---------------------------------------------------------------------------
 
 
-class TestTelemetryLogging:
-    def test_telemetry_logged_when_enabled(self, tmp_path: Path):
+class TestTelemetryRecording:
+    def test_not_recorded_by_default(self, tmp_path: Path):
         conn = FakeConnection()
         det = HeartbeatDetector(target_uav="uav_0", source="m", timeout_sec=10.0)
-        log_path = tmp_path / "monitor.jsonl"
-
-        with _make_monitor(
-            tmp_path, detectors=[det], conn=conn, log_telemetry=True
-        ) as m:
-            for _ in range(5):
-                conn.push(FakeMessage("HEARTBEAT", 1, {}))
-            assert _wait_until(lambda: m.stats["telemetry_seen"] >= 5)
-
-        events = read_jsonl(log_path)
-        telemetry = [e for e in events if e.event_type == "telemetry"]
-        assert len(telemetry) >= 5
-
-    def test_telemetry_not_logged_by_default(self, tmp_path: Path):
-        conn = FakeConnection()
-        det = HeartbeatDetector(target_uav="uav_0", source="m", timeout_sec=10.0)
-        log_path = tmp_path / "monitor.jsonl"
+        traj = tmp_path / "telemetry_uav_0.jsonl"
 
         with _make_monitor(tmp_path, detectors=[det], conn=conn) as m:
-            for _ in range(5):
-                conn.push(FakeMessage("HEARTBEAT", 1, {}))
-            assert _wait_until(lambda: m.stats["telemetry_seen"] >= 5)
+            for _ in range(3):
+                conn.push(_estimator_msg())
+            assert _wait_until(lambda: m.stats["telemetry_seen"] >= 3)
 
+        assert not traj.exists()
+        assert m.stats["telemetry_logged"] == 0
+
+    def test_records_to_its_own_file(self, tmp_path: Path):
+        conn = FakeConnection()
+        det = HeartbeatDetector(target_uav="uav_0", source="m", timeout_sec=10.0)
+        traj = tmp_path / "telemetry_uav_0.jsonl"
+
+        with _make_monitor(
+            tmp_path, detectors=[det], conn=conn, telemetry_log_path=traj
+        ) as m:
+            for i in range(4):
+                conn.push(_estimator_msg(ratio=0.006 + i))
+            assert _wait_until(lambda: m.stats["telemetry_logged"] >= 4)
+
+        events = read_jsonl(traj)
+        assert len(events) == 4
+        assert all(e.event_type == "telemetry" for e in events)
+        assert all(isinstance(e, TelemetryEvent) for e in events)
+        assert events[0].data["pos_horiz_ratio"] == 0.006
+
+    def test_never_enters_the_event_log(self, tmp_path: Path):
+        # The whole reason the old log_telemetry flag was unusable: it
+        # wrote into log_path, which merge_jsonl folds into merged.jsonl,
+        # drowning the event stream the metrics layer reads.
+        conn = FakeConnection()
+        det = HeartbeatDetector(target_uav="uav_0", source="m", timeout_sec=10.0)
+        log_path = tmp_path / "monitor.jsonl"
+        traj = tmp_path / "telemetry_uav_0.jsonl"
+
+        with _make_monitor(
+            tmp_path, detectors=[det], conn=conn, telemetry_log_path=traj
+        ) as m:
+            for _ in range(5):
+                conn.push(_estimator_msg())
+            assert _wait_until(lambda: m.stats["telemetry_logged"] >= 5)
+
+        assert len(read_jsonl(traj)) == 5
         if log_path.exists() and log_path.stat().st_size > 0:
             events = read_jsonl(log_path)
             assert all(e.event_type != "telemetry" for e in events)
+
+    def test_filters_by_msg_type(self, tmp_path: Path):
+        # The listener whitelist carries ATTITUDE at ~50 Hz. Recording
+        # everything for 3 UAVs x 160 s would be noise, not evidence.
+        conn = FakeConnection()
+        det = HeartbeatDetector(target_uav="uav_0", source="m", timeout_sec=10.0)
+        traj = tmp_path / "telemetry_uav_0.jsonl"
+
+        with _make_monitor(
+            tmp_path, detectors=[det], conn=conn, telemetry_log_path=traj
+        ) as m:
+            conn.push(_estimator_msg())
+            for _ in range(5):
+                conn.push(FakeMessage("HEARTBEAT", 1, {}))
+                conn.push(FakeMessage("ATTITUDE", 1, {"roll": 0.1}))
+            assert _wait_until(lambda: m.stats["telemetry_seen"] >= 11)
+
+        events = read_jsonl(traj)
+        assert len(events) == 1
+        assert events[0].msg_type == "ESTIMATOR_STATUS"
+
+    def test_default_types_cover_both_channels(self, tmp_path: Path):
+        det = HeartbeatDetector(target_uav="uav_0", source="m")
+        m = _make_monitor(
+            tmp_path,
+            detectors=[det],
+            telemetry_log_path=tmp_path / "t.jsonl",
+        )
+        assert m.telemetry_log_types == DEFAULT_TELEMETRY_LOG_TYPES
+        assert "ESTIMATOR_STATUS" in m.telemetry_log_types
+        assert "LOCAL_POSITION_NED" in m.telemetry_log_types
+
+    def test_custom_types(self, tmp_path: Path):
+        conn = FakeConnection()
+        det = HeartbeatDetector(target_uav="uav_0", source="m", timeout_sec=10.0)
+        traj = tmp_path / "telemetry_uav_0.jsonl"
+
+        with _make_monitor(
+            tmp_path,
+            detectors=[det],
+            conn=conn,
+            telemetry_log_path=traj,
+            telemetry_log_types=["LOCAL_POSITION_NED"],
+        ) as m:
+            conn.push(_estimator_msg())
+            conn.push(FakeMessage("LOCAL_POSITION_NED", 1, {"x": 1.0}))
+            assert _wait_until(lambda: m.stats["telemetry_seen"] >= 2)
+            assert _wait_until(lambda: m.stats["telemetry_logged"] >= 1)
+
+        events = read_jsonl(traj)
+        assert len(events) == 1
+        assert events[0].msg_type == "LOCAL_POSITION_NED"
+
+    def test_types_without_path_rejected(self, tmp_path: Path):
+        # Choosing what to record without saying where would collect
+        # nothing while looking configured.
+        det = HeartbeatDetector(target_uav="uav_0", source="m")
+        with pytest.raises(ValueError, match="requires telemetry_log_path"):
+            Monitor(
+                uav_id="uav_0",
+                source="m",
+                telemetry_endpoint="x",
+                sysid=1,
+                detectors=[det],
+                log_path=tmp_path / "m.jsonl",
+                telemetry_log_types=["ESTIMATOR_STATUS"],
+            )
+
+    def test_recording_survives_detector_takeout(self, tmp_path: Path):
+        # R5's mechanism, not just its outcome: detector_takeout silences
+        # the detectors but leaves the listener alive, so the series shows
+        # exactly what the silenced detector WOULD have seen.
+        conn = FakeConnection()
+        det = HeartbeatDetector(target_uav="uav_0", source="m", timeout_sec=10.0)
+        traj = tmp_path / "telemetry_uav_0.jsonl"
+
+        with _make_monitor(
+            tmp_path, detectors=[det], conn=conn, telemetry_log_path=traj
+        ) as m:
+            conn.push(_estimator_msg(ratio=0.006))
+            assert _wait_until(lambda: m.stats["telemetry_logged"] >= 1)
+
+            m.disable_local_detectors()
+
+            for _ in range(3):
+                conn.push(_estimator_msg(ratio=2.0))
+            assert _wait_until(lambda: m.stats["telemetry_logged"] >= 4)
+
+        assert m.stats["security_emitted"] == 0   # detectors are silent
+        events = read_jsonl(traj)
+        assert len(events) == 4
+        assert [e.data["pos_horiz_ratio"] for e in events] == [
+            0.006, 2.0, 2.0, 2.0
+        ]
+
+    def test_recorded_series_feeds_the_metrics_module(self, tmp_path: Path):
+        # End to end: what the monitor writes is what estimator_series
+        # reads. This is the seam OPEN-3 depends on.
+        from metrics.estimator_series import estimator_series, read_telemetry
+
+        conn = FakeConnection()
+        det = HeartbeatDetector(target_uav="uav_0", source="m", timeout_sec=10.0)
+        traj = tmp_path / "telemetry_uav_0.jsonl"
+
+        t0 = time.time()
+        with _make_monitor(
+            tmp_path, detectors=[det], conn=conn, telemetry_log_path=traj
+        ) as m:
+            for _ in range(4):
+                conn.push(_estimator_msg(ratio=1.5))
+            assert _wait_until(lambda: m.stats["telemetry_logged"] >= 4)
+
+        samples = read_telemetry(traj)
+        res = estimator_series(samples, t0, target_uav="uav_0")
+        assert res["uavs"]["uav_0"]["n"] == 4
+        assert res["uavs"]["uav_0"]["max_consecutive_above"] == 4
+        assert res["uavs"]["uav_0"]["peak"] == 1.5
+
+    def test_recording_after_detectors_not_before(self, tmp_path: Path):
+        # Instrumentation upstream of the measurement changes the
+        # measurement: MTTD is timed from the SecurityEvent, so telemetry
+        # I/O must not sit on the path to it. Pinned by observing that a
+        # detector firing on a message sees it before the recorder does.
+        from detectors.base import Detector
+
+        order: list[str] = []
+
+        class OrderingDetector(Detector):
+            @property
+            def name(self): return "ordering"
+            @property
+            def target_uav(self): return "uav_0"
+            def feed(self, event):
+                if event.msg_type == "ESTIMATOR_STATUS":
+                    order.append("detector")
+                return None
+            def reset(self): pass
+
+        conn = FakeConnection()
+        traj = tmp_path / "telemetry_uav_0.jsonl"
+
+        with _make_monitor(
+            tmp_path,
+            detectors=[OrderingDetector()],
+            conn=conn,
+            telemetry_log_path=traj,
+        ) as m:
+            conn.push(_estimator_msg())
+            assert _wait_until(lambda: m.stats["telemetry_logged"] >= 1)
+            order.append("recorder_done")
+
+        assert order[0] == "detector"
 
 
 # ---------------------------------------------------------------------------

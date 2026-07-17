@@ -454,3 +454,114 @@ observation.
 2. R2 batch (currently N=1 smoke; R1 already has N=10).
 3. OPEN-2 sweeps.
 4. Full campaign, N=30/cell, with the statistics from OPEN-2.4.
+
+## R9. MTTD decomposes — and most of it is the test rig, not the architecture
+
+**What forced this:** the instrumentation for OPEN-3 (item 2A) recorded
+the raw `pos_horiz_ratio` series for the first time. The very first
+instrumented run explained MTTD arithmetically, and the explanation is
+inconvenient.
+
+### Data (`runs/run_c_gps_spoofing_1784270714`, arch C, gps_spoofing)
+
+MTTD 3.276 s, detected, impact_scope 1, flying at inject: True.
+uav_0 series: rate 0.9855 Hz, baseline_median 0.0104, n=159.
+
+| t_rel (s) | pos_horiz_ratio | |
+|---|---|---|
+| -0.773 | 0.0141 | quiet |
+| +0.233 | 0.3726 | ramp begins |
+| **+1.278** | **2.0** | first crossing of threshold 1.0 |
+| +2.307 | 2.0 | 2 of 3 |
+| **+3.299** | **2.0** | 3 of 3 -> sustain satisfied, detector fires |
+| +4.337 … +6.371 | 2.0 | still breaching (6 samples total) |
+| **+7.364** | **0.0007** | collapse to baseline in ONE sample |
+
+Detector fired at 3.276 s; the third breach sample is at +3.299 s. The
+series accounts for MTTD to within the sample period.
+
+### The decomposition
+
+    MTTD = first_cross + (sustained_samples - 1) / rate
+         = 1.278       + (3 - 1) / 0.9855
+         = 1.278       + 2.03
+         ~ 3.3 s
+
+**2.0 s of the 3.113 s headline is a floor**, set by
+`sustained_samples=3` and PX4's 1 Hz ESTIMATOR_STATUS. It is not a
+property of the architecture. All variance lives in `first_cross`
+(~1.1 +/- 0.7 across runs_v3).
+
+### Why this matters, stated plainly
+
+The floor is **identical for A, B and C** — same detector, same PX4 — so
+it cancels in the architectural comparison. It costs nothing there. What
+it costs is the headline: "MTTD 3.113 s" presented as the speed of
+Architecture C would be 64% a property of the rig. A reviewer who spots
+that unaided will read it as not understanding one's own test bench; the
+same reviewer reading the decomposition reads methodological control.
+
+This is the same story as MTTR (15 ms = dispatch latency, not recovery).
+**Both time metrics in this PoC measure the rig more than the
+architecture.** That is not a failure of the work — it is its boundary,
+and the boundary has to be named. What carries the comparison is
+`impact_scope` and the FACT of detection: `detector_takeout` gives C
+10/10 via cross_check against A=B=0/10, and that difference is the
+presence of a second signal channel, not speed.
+
+### A confound this exposes — do NOT report 3.3 vs 8.1 as a speed result
+
+`cross_check` MTTD is 8.101 +/- 0.233 s (R5). It has its OWN floor, set
+by `peer_publish_period_sec = 1.0` and the cross-check's own logic. How
+much of 8.101 is architecture and how much is publish cadence is
+currently **unknown**. Until it is decomposed the same way, the
+gps-detector's 3.3 s and cross_check's 8.1 s are not comparable as
+"faster/slower".
+
+### OPEN-3: a mechanism, not yet an answer
+
+The breach window was **6 samples where 3 are required** — a 2x margin,
+and everything rests on it. The ratio does not decay: it collapses
+2.0 -> 0.0007 in one sample at +7.36 s, i.e. the EKF re-converges onto
+the biased position in a step. If in some run the ramp starts later or
+the EKF re-converges sooner, `max_consecutive_above` drops below 3 and
+the detector stays silent while the attack works perfectly.
+
+That is the "signature present, sustain rejected" branch, and it now
+PREDICTS non-detections instead of rationalising them after the fact.
+
+**Not closed.** N=1, and it detected. The undetected run predates the
+instrument and has no series — it never will. Honest statement: the
+instrument exists; the question becomes answerable the next time a
+non-detection occurs in an instrumented run. Do not spend runs hunting it
+deliberately.
+
+### `peak` is censored — matters for the OPEN-2 magnitude sweep
+
+The ratio clips at exactly 2.0 and holds. `peak: 2.0` therefore means
+">= 2.0" and nothing more; no measure of signal strength can be built on
+it. At 50 m of offset the signal is already at the ceiling, so the
+planned magnitude sweep (5/10/20/30/50/80 m) will only resolve
+differences BELOW it. Design the sweep around that, or the top of the
+curve will be flat by construction rather than by physics.
+
+### What to do about the floor
+
+1. **Decompose and name it** — a table "MTTD = floor + variable part" per
+   detection channel, including cross_check. Mandatory regardless of the
+   rest.
+2. **Sweep `sustained_samples`** (1/2/3/5) — turns the floor from an
+   artefact into an AXIS: detection rate vs false positives vs MTTD.
+   Cheap: a detector parameter, the rig is untouched. Add to OPEN-2.
+3. **Raise the ESTIMATOR_STATUS rate** (MAVLink stream interval). 5 Hz
+   would drop the floor 2.0 -> 0.4 s and make `first_cross` dominant.
+   **Rejected for now**: it makes runs_v3 incomparable and introduces a
+   fresh PX4-side unknown immediately before a ~1160-run campaign.
+
+### Thesis placement
+
+Ch.5: the decomposition table, and the honest reading that MTTD's floor
+is a rig constant shared by all three architectures. Ch.4: the 6-sample
+breach window and the one-sample EKF re-convergence, as the mechanism
+behind the ramp-onset signature note. Threats to validity: OPEN-3's
+prediction that detection rate is partly a property of the injection.
