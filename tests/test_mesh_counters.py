@@ -21,8 +21,11 @@ Two properties are under test:
 
 from __future__ import annotations
 
+import random
 import socket
 import time
+
+import pytest
 
 from core.events import IsolationAnnounce, SecurityEvent
 from core.mesh import NoOpMesh, ZmqMesh, topic_for
@@ -78,22 +81,18 @@ class TestZeroBaselines:
                 )
             counters = bus.mesh_counters()
 
+        zero_bucket = {"per_topic": {}, "total": {"msgs": 0, "bytes": 0}}
         assert counters["endpoint"] is None
-        assert counters["published"] == {
-            "per_topic": {},
-            "total": {"msgs": 0, "bytes": 0},
-        }
-        assert counters["delivered"] == {
-            "per_topic": {},
-            "total": {"msgs": 0, "bytes": 0},
-        }
+        assert counters["published"] == zero_bucket
+        assert counters["delivered"] == zero_bucket
+        assert counters["dropped"] == zero_bucket
 
     def test_snapshot_shape_is_stable(self):
         """Every bus returns the same top-level shape, so the metrics layer
         can fold A/B and C uniformly."""
         counters = NoOpMesh().mesh_counters()
-        assert set(counters) == {"endpoint", "published", "delivered"}
-        for bucket in ("published", "delivered"):
+        assert set(counters) == {"endpoint", "published", "delivered", "dropped"}
+        for bucket in ("published", "delivered", "dropped"):
             assert set(counters[bucket]) == {"per_topic", "total"}
             assert set(counters[bucket]["total"]) == {"msgs", "bytes"}
 
@@ -264,3 +263,123 @@ class TestDeliveryCounts:
         # After stop(), the snapshot is still readable and non-zero.
         assert a.mesh_counters()["published"]["total"]["msgs"] == 1
         assert b.mesh_counters()["delivered"]["total"]["msgs"] == 1
+
+
+# ----------------------------------------------------------------------------
+# Channel loss (instrumentation item 4) — receive-side Bernoulli erasure
+# ----------------------------------------------------------------------------
+
+
+class TestChannelLoss:
+    def test_default_loss_is_zero_and_delivers_all(self):
+        """loss_prob defaults to 0.0: every frame delivered, nothing dropped.
+        This is the identity guarantee — the baseline behaviour is unchanged
+        (the RNG is never even sampled)."""
+        port_a, port_b = _free_ports(2)
+        ep_a, ep_b = f"tcp://127.0.0.1:{port_a}", f"tcp://127.0.0.1:{port_b}"
+
+        got: list = []
+        a = ZmqMesh(self_endpoint=ep_a, peer_endpoints=[ep_b])
+        b = ZmqMesh(self_endpoint=ep_b, peer_endpoints=[ep_a])
+        n = 20
+
+        try:
+            a.start()
+            b.start()
+            b.subscribe("security", lambda e: got.append(e))
+            for _ in range(n):
+                a.publish(
+                    SecurityEvent(source="a", detector="gps", target_uav="uav_2")
+                )
+            assert _wait_until(lambda: len(got) == n)
+            deliv = b.mesh_counters()["delivered"]["total"]
+            assert deliv["msgs"] == n
+            assert b.mesh_counters()["dropped"]["total"] == {"msgs": 0, "bytes": 0}
+        finally:
+            a.stop()
+            b.stop()
+
+    def test_full_loss_drops_every_frame(self):
+        """loss_prob=1.0: every received frame is erased. Nothing is
+        dispatched; each arrival is counted as dropped, not delivered."""
+        port_a, port_b = _free_ports(2)
+        ep_a, ep_b = f"tcp://127.0.0.1:{port_a}", f"tcp://127.0.0.1:{port_b}"
+
+        got: list = []
+        a = ZmqMesh(self_endpoint=ep_a, peer_endpoints=[ep_b])
+        b = ZmqMesh(self_endpoint=ep_b, peer_endpoints=[ep_a], loss_prob=1.0)
+        n = 15
+
+        try:
+            a.start()
+            b.start()
+            b.subscribe("security", lambda e: got.append(e))
+            for _ in range(n):
+                a.publish(
+                    SecurityEvent(source="a", detector="gps", target_uav="uav_2")
+                )
+            assert _wait_until(
+                lambda: b.mesh_counters()["dropped"]["total"]["msgs"] == n
+            )
+            assert b.mesh_counters()["delivered"]["total"] == {"msgs": 0, "bytes": 0}
+            # Nothing was ever dispatched to the subscriber.
+            time.sleep(0.1)
+            assert got == []
+            # Publisher's own offered-load count is unaffected by the peer's loss.
+            assert a.mesh_counters()["published"]["total"]["msgs"] == n
+        finally:
+            a.stop()
+            b.stop()
+
+    def test_partial_loss_is_seed_deterministic(self):
+        """loss_prob=0.5 with a fixed seed and a single publisher (one TCP
+        connection preserves send order) => the drop decisions are exactly
+        those of random.Random(seed) over the arrival sequence."""
+        port_a, port_b = _free_ports(2)
+        ep_a, ep_b = f"tcp://127.0.0.1:{port_a}", f"tcp://127.0.0.1:{port_b}"
+
+        seed, n, p = 12345, 40, 0.5
+        got: list = []
+        a = ZmqMesh(self_endpoint=ep_a, peer_endpoints=[ep_b])
+        b = ZmqMesh(
+            self_endpoint=ep_b, peer_endpoints=[ep_a], loss_prob=p, rng_seed=seed
+        )
+
+        try:
+            a.start()
+            b.start()
+            b.subscribe("security", lambda e: got.append(e))
+            for _ in range(n):
+                a.publish(
+                    SecurityEvent(source="a", detector="gps", target_uav="uav_2")
+                )
+            # All n frames must arrive (dropped + delivered) before we compare.
+            assert _wait_until(
+                lambda: (
+                    b.mesh_counters()["dropped"]["total"]["msgs"]
+                    + b.mesh_counters()["delivered"]["total"]["msgs"]
+                )
+                == n
+            )
+            # Expected drops = the same RNG's decision stream over n frames.
+            rng = random.Random(seed)
+            expected_drops = sum(rng.random() < p for _ in range(n))
+
+            counters = b.mesh_counters()
+            assert counters["dropped"]["total"]["msgs"] == expected_drops
+            assert counters["delivered"]["total"]["msgs"] == n - expected_drops
+            assert len(got) == n - expected_drops
+            # A genuine partial: neither all nor nothing (guards the seed choice).
+            assert 0 < expected_drops < n
+        finally:
+            a.stop()
+            b.stop()
+
+    def test_invalid_loss_prob_rejected(self):
+        for bad in (-0.1, 1.5):
+            with pytest.raises(ValueError, match="loss_prob"):
+                ZmqMesh(
+                    self_endpoint="tcp://127.0.0.1:5599",
+                    peer_endpoints=[],
+                    loss_prob=bad,
+                )

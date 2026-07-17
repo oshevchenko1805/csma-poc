@@ -5,11 +5,14 @@ Each MeshBus reports its own traffic via `mesh_counters()`:
 
     {"endpoint": <str|None>,
      "published": {"per_topic": {topic: {"msgs", "bytes"}}, "total": {...}},
-     "delivered": {"per_topic": {topic: {"msgs", "bytes"}}, "total": {...}}}
+     "delivered": {"per_topic": {topic: {"msgs", "bytes"}}, "total": {...}},
+     "dropped":   {"per_topic": {topic: {"msgs", "bytes"}}, "total": {...}}}
 
-`fleet_mesh_cost` folds a list of those snapshots into one view for
-run_summary.json: every peer preserved as-is under `per_peer`, plus a
-`fleet_total` that sums per topic and overall across peers.
+`dropped` counts frames erased by the item-4 loss model (zero unless loss
+is enabled). `fleet_mesh_cost` folds a list of those snapshots into one
+view for run_summary.json: every peer preserved as-is under `per_peer`,
+plus a `fleet_total` that sums each of the three streams per topic and
+overall across peers.
 
 Pure function, no I/O, no architecture branch. Architectures A and B hold
 no mesh instances, so the caller passes an empty list and gets an all-zero
@@ -64,19 +67,27 @@ def fleet_mesh_cost(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
     Returns
     -------
     {"per_peer": [<snapshot>, ...],
-     "fleet_total": {"published": <bucket>, "delivered": <bucket>}}
+     "fleet_total": {"published": <bucket>, "delivered": <bucket>,
+                     "dropped": <bucket>}}
     """
     published = _empty_bucket()
     delivered = _empty_bucket()
+    dropped = _empty_bucket()
 
     for snap in snapshots:
         _accumulate(published, snap.get("published", {}))
         _accumulate(delivered, snap.get("delivered", {}))
+        _accumulate(dropped, snap.get("dropped", {}))
 
     _finalise_total(published)
     _finalise_total(delivered)
+    _finalise_total(dropped)
 
     return {
         "per_peer": copy.deepcopy(snapshots),
-        "fleet_total": {"published": published, "delivered": delivered},
+        "fleet_total": {
+            "published": published,
+            "delivered": delivered,
+            "dropped": dropped,
+        },
     }

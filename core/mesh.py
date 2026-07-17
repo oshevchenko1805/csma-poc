@@ -33,11 +33,27 @@ A and B never pay").
 (`len(topic) + len(payload)`), NOT TCP/IP/Ethernet overhead — that cannot
 be measured cleanly at this layer and is out of scope. Report it as a
 lower bound on on-wire cost.
+
+Channel degradation (instrumentation item 4)
+--------------------------------------------
+ZmqMesh can drop delivered frames to emulate a lossy FANET channel. The
+loss is an independent Bernoulli erasure applied per received frame at
+each receiver (so one publish may reach one peer and not another) — an
+erasure-channel approximation, NOT a full RF model (no reordering or
+corruption). TCP itself never loses frames; the drop is synthetic.
+
+This is distinct from the comm_disruption ATTACK, which is adversarial and
+modelled at the network layer (iptables / socket close). Item 4 models the
+ambient, non-adversarial channel quality the mesh runs over; the attack
+sits on top of it. Dropped frames are tallied separately (`dropped`), so
+realized loss = dropped / (delivered + dropped) is measurable from
+run_summary. Default loss_prob 0.0 is a strict no-op.
 """
 
 from __future__ import annotations
 
 import json
+import random
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -89,7 +105,11 @@ EventCallback = Callable[[BaseEvent], None]
 #
 # and the full counter is:
 #
-#     {"endpoint": <str|None>, "published": <bucket>, "delivered": <bucket>}
+#     {"endpoint": <str|None>,
+#      "published": <bucket>, "delivered": <bucket>, "dropped": <bucket>}
+#
+# `dropped` counts frames erased by the item-4 loss model (zero unless
+# loss is enabled), kept separate from `delivered` so the two never mix.
 
 
 def _empty_bucket() -> dict:
@@ -102,6 +122,7 @@ def zero_mesh_counters(endpoint: Optional[str] = None) -> dict:
         "endpoint": endpoint,
         "published": _empty_bucket(),
         "delivered": _empty_bucket(),
+        "dropped": _empty_bucket(),
     }
 
 
@@ -209,6 +230,16 @@ class ZmqMesh(MeshBus):
                             messages published before SUB has finished
                             attaching are silently dropped. Sleep this long
                             after start() before publishing.
+    loss_prob               Probability [0.0, 1.0] of erasing each received
+                            frame (item 4). 0.0 (default) is a strict
+                            no-op: the RNG is never sampled and delivery is
+                            unchanged. Erased frames are tallied in
+                            `dropped`, not `delivered`.
+    rng_seed                Seed for the loss RNG. Makes UNIT TESTS
+                            deterministic; it does NOT make live runs
+                            bit-identical (TCP arrival timing is not
+                            deterministic). Reproducibility of a treatment
+                            comes from N repetitions at a fixed loss_prob.
 
     Threading model:
         A daemon thread runs a poll loop on the SUB socket. Incoming
@@ -233,10 +264,20 @@ class ZmqMesh(MeshBus):
         self_endpoint: str,
         peer_endpoints: list[str],
         slow_joiner_delay_sec: float = 0.3,
+        loss_prob: float = 0.0,
+        rng_seed: Optional[int] = None,
     ) -> None:
         self.self_endpoint = self_endpoint
         self.peer_endpoints = list(peer_endpoints)
         self.slow_joiner_delay_sec = slow_joiner_delay_sec
+
+        self._loss_prob = float(loss_prob)
+        if not 0.0 <= self._loss_prob <= 1.0:
+            raise ValueError("loss_prob must be in [0.0, 1.0]")
+        # Dedicated RNG, touched ONLY by the receiver thread (one thread),
+        # so it needs no lock. See class docstring on what the seed does
+        # and does not guarantee.
+        self._rng = random.Random(rng_seed)
 
         # Late import so NoOpMesh users on minimal envs don't need pyzmq.
         import zmq
@@ -258,6 +299,7 @@ class ZmqMesh(MeshBus):
         self._counter_lock = threading.Lock()
         self._pub_tally: dict[str, dict[str, int]] = {}
         self._delivered_tally: dict[str, dict[str, int]] = {}
+        self._dropped_tally: dict[str, dict[str, int]] = {}
 
     # ----- lifecycle -----
 
@@ -337,10 +379,12 @@ class ZmqMesh(MeshBus):
         with self._counter_lock:
             pub_raw = {t: dict(v) for t, v in self._pub_tally.items()}
             deliv_raw = {t: dict(v) for t, v in self._delivered_tally.items()}
+            drop_raw = {t: dict(v) for t, v in self._dropped_tally.items()}
         return {
             "endpoint": self.self_endpoint,
             "published": _bucket_from_raw(pub_raw),
             "delivered": _bucket_from_raw(deliv_raw),
+            "dropped": _bucket_from_raw(drop_raw),
         }
 
     # ----- receiver thread -----
@@ -376,6 +420,19 @@ class ZmqMesh(MeshBus):
                 event = event_from_json(payload_b.decode("utf-8"))
             except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
                 # Don't crash a peer because someone sent garbage.
+                continue
+
+            # Channel degradation (item 4): independent Bernoulli erasure per
+            # received frame. Guarded so loss_prob == 0.0 is a strict no-op —
+            # the RNG is never even sampled and delivery is bit-for-bit as
+            # before. An erased frame is tallied as `dropped` (not delivered)
+            # and never dispatched, so realized loss is measurable and the
+            # loss knob is self-verifying (delivered falls below published x
+            # fanout). rng lives on this thread only, so no lock needed.
+            if self._loss_prob > 0.0 and self._rng.random() < self._loss_prob:
+                self._tally(
+                    self._dropped_tally, topic, len(topic_b) + len(payload_b)
+                )
                 continue
 
             # Count the frame that actually arrived on the wire, before
