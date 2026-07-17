@@ -15,6 +15,24 @@ PoC caveat (Chapter 4): ZeroMQ over TCP is not a FANET radio mesh. It
 approximates the propagation semantics (peer-to-peer, no central broker)
 but not the physical channel. Communication-disruption attacks are
 modelled at the network layer (iptables / socket close), not at RF.
+
+Cost instrumentation (instrumentation item 3)
+---------------------------------------------
+Every MeshBus exposes `mesh_counters()`: a snapshot of how many messages
+and application-payload bytes crossed the bus, split into `published`
+(offered load at this peer) and `delivered` (frames that arrived on this
+peer's SUB socket), each broken down per topic plus a derived total.
+
+The counters are pure observation: incrementing them changes neither the
+delivery path nor its timing. NoOpMesh (and the ABC default) report zeros,
+so Architectures A and B carry zero mesh cost by construction — which is
+the whole point of the trade-off ("C detects, at a cost of X messages that
+A and B never pay").
+
+"Bytes" here are the application frame we form ourselves
+(`len(topic) + len(payload)`), NOT TCP/IP/Ethernet overhead — that cannot
+be measured cleanly at this layer and is out of scope. Report it as a
+lower bound on on-wire cost.
 """
 
 from __future__ import annotations
@@ -59,6 +77,46 @@ EventCallback = Callable[[BaseEvent], None]
 
 
 # ----------------------------------------------------------------------------
+# Cost-counter helpers (instrumentation item 3)
+# ----------------------------------------------------------------------------
+#
+# Snapshot shape (both `published` and `delivered` follow it):
+#
+#     {
+#       "per_topic": {"security": {"msgs": N, "bytes": B}, ...},
+#       "total":     {"msgs": N_sum, "bytes": B_sum},
+#     }
+#
+# and the full counter is:
+#
+#     {"endpoint": <str|None>, "published": <bucket>, "delivered": <bucket>}
+
+
+def _empty_bucket() -> dict:
+    return {"per_topic": {}, "total": {"msgs": 0, "bytes": 0}}
+
+
+def zero_mesh_counters(endpoint: Optional[str] = None) -> dict:
+    """A counter snapshot with everything at zero (A/B baseline)."""
+    return {
+        "endpoint": endpoint,
+        "published": _empty_bucket(),
+        "delivered": _empty_bucket(),
+    }
+
+
+def _bucket_from_raw(raw: dict[str, dict[str, int]]) -> dict:
+    """Turn a {topic: {msgs, bytes}} tally into a bucket with a derived total."""
+    per_topic = {t: dict(v) for t, v in raw.items()}
+    total_msgs = sum(v["msgs"] for v in per_topic.values())
+    total_bytes = sum(v["bytes"] for v in per_topic.values())
+    return {
+        "per_topic": per_topic,
+        "total": {"msgs": total_msgs, "bytes": total_bytes},
+    }
+
+
+# ----------------------------------------------------------------------------
 # Interface
 # ----------------------------------------------------------------------------
 
@@ -83,6 +141,16 @@ class MeshBus(ABC):
     @abstractmethod
     def subscribe(self, topic: str, callback: EventCallback) -> None: ...
 
+    def mesh_counters(self) -> dict:
+        """Cost snapshot. Default is all-zeros; ZmqMesh overrides.
+
+        A concrete default (rather than an abstractmethod) so NoOpMesh — and
+        any future transport that carries no measurable cost — reports zeros
+        without boilerplate, letting the metrics layer fold every bus in a
+        fleet uniformly.
+        """
+        return zero_mesh_counters(endpoint=None)
+
     def __enter__(self) -> "MeshBus":
         self.start()
         return self
@@ -102,7 +170,8 @@ class NoOpMesh(MeshBus):
 
     publish() drops silently; subscribe() registers a callback that will
     never be invoked. The interface is identical to ZmqMesh so domain code
-    is architecture-agnostic.
+    is architecture-agnostic. Inherits the all-zeros mesh_counters() from
+    MeshBus: no traffic crosses it, so its cost is zero by construction.
     """
 
     def __init__(self) -> None:
@@ -149,6 +218,14 @@ class ZmqMesh(MeshBus):
 
         A buggy callback that raises an exception is logged-and-swallowed
         — one bad subscriber must not bring down the entire bus.
+
+    Cost counters:
+        `publish()` tallies each frame it puts on the wire (per topic);
+        the receiver thread tallies each well-formed frame that arrives on
+        the SUB socket. Both are guarded by `_counter_lock` because publish
+        runs on domain threads and delivery on the receiver thread. The
+        tallies are never reset by stop(), so `mesh_counters()` is readable
+        after the run for folding into run_summary.
     """
 
     def __init__(
@@ -174,6 +251,13 @@ class ZmqMesh(MeshBus):
         self._callbacks: dict[str, list[EventCallback]] = {}
         self._cb_lock = threading.Lock()
         self._started: bool = False
+
+        # Cost counters. {topic: {"msgs": int, "bytes": int}}. Guarded by
+        # _counter_lock; publish runs on domain threads, delivery on the
+        # receiver thread.
+        self._counter_lock = threading.Lock()
+        self._pub_tally: dict[str, dict[str, int]] = {}
+        self._delivered_tally: dict[str, dict[str, int]] = {}
 
     # ----- lifecycle -----
 
@@ -218,6 +302,8 @@ class ZmqMesh(MeshBus):
             self._pub = None
         # We deliberately don't terminate the shared zmq.Context.instance(),
         # because other ZmqMesh instances in the same process may still use it.
+        # Counters are deliberately NOT reset here: mesh_counters() must stay
+        # readable after the run for folding into run_summary.
         self._started = False
 
     # ----- pub/sub API -----
@@ -226,12 +312,36 @@ class ZmqMesh(MeshBus):
         if not self._started or self._pub is None:
             raise RuntimeError("ZmqMesh.publish called before start()")
         topic = topic_for(event)
+        topic_b = topic.encode("utf-8")
         payload = event.to_json().encode("utf-8")
-        self._pub.send_multipart([topic.encode("utf-8"), payload])
+        self._pub.send_multipart([topic_b, payload])
+        # Count only after a successful send: if topic_for had raised, nothing
+        # went on the wire, so nothing is counted.
+        self._tally(self._pub_tally, topic, len(topic_b) + len(payload))
 
     def subscribe(self, topic: str, callback: EventCallback) -> None:
         with self._cb_lock:
             self._callbacks.setdefault(topic, []).append(callback)
+
+    # ----- cost counters -----
+
+    def _tally(
+        self, tally: dict[str, dict[str, int]], topic: str, nbytes: int
+    ) -> None:
+        with self._counter_lock:
+            slot = tally.setdefault(topic, {"msgs": 0, "bytes": 0})
+            slot["msgs"] += 1
+            slot["bytes"] += nbytes
+
+    def mesh_counters(self) -> dict:
+        with self._counter_lock:
+            pub_raw = {t: dict(v) for t, v in self._pub_tally.items()}
+            deliv_raw = {t: dict(v) for t, v in self._delivered_tally.items()}
+        return {
+            "endpoint": self.self_endpoint,
+            "published": _bucket_from_raw(pub_raw),
+            "delivered": _bucket_from_raw(deliv_raw),
+        }
 
     # ----- receiver thread -----
 
@@ -267,6 +377,11 @@ class ZmqMesh(MeshBus):
             except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
                 # Don't crash a peer because someone sent garbage.
                 continue
+
+            # Count the frame that actually arrived on the wire, before
+            # dispatch: delivery cost is a property of the network, not of
+            # how many subscribers happen to be attached to this topic.
+            self._tally(self._delivered_tally, topic, len(topic_b) + len(payload_b))
 
             with self._cb_lock:
                 callbacks = list(self._callbacks.get(topic, []))
