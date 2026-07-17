@@ -37,6 +37,26 @@ Teardown order matters twice over:
   - then stop monitors first so no new mesh publishes happen, then
     coordinators, then meshes. Reversing that can deadlock if a
     coordinator tries to publish a final ack into a stopped mesh.
+
+Self-describing runs (mission_plan / flight_at_attack)
+------------------------------------------------------
+`run_summary.json` also carries what route was flown and what the UAVs
+were physically doing at the injection instant (Gazebo ground truth).
+
+Both exist because runs_v1, runs_v2 and results R1-R4 attacked a
+HOVERING UAV for 120 trials and nothing in the pipeline recorded enough
+to notice: the answer was recoverable only by hand-reading a trajectory,
+so it was asked once, late (RESULTS_NOTES OPEN-1 / R7). On the
+~1160-trial campaign that failure mode is silent and unrepeatable, so a
+run now states its own validity rather than leaving it to be
+reconstructed.
+
+Neither fact can be looked up afterwards: `*.jsonl` is gitignored, and
+`configs/experiment.yaml` drifts under the OPEN-2 sweeps. They have to
+travel with the run.
+
+Nothing here branches on architecture, so the identical-measurement-
+procedure requirement (thesis 3.5.5, table 3.14) holds by construction.
 """
 
 from __future__ import annotations
@@ -53,6 +73,11 @@ from core.config import ArchitectureConfig, ExperimentConfig
 from core.events import AttackEvent
 from core.logger import EventLogger, merge_jsonl
 from enforcement.handlers import ProcessRunner
+from metrics.flight_check import (
+    flight_state_at,
+    mission_plan_summary,
+    read_trajectory,
+)
 from runners.factory import (
     ConnectionFactory,
     MeshFactory,
@@ -87,6 +112,12 @@ class RunResult:
     coordinator_stats: list[dict[str, Any]] = field(default_factory=list)
     trajectory_stats: Optional[dict[str, Any]] = None
     """Ground-truth recorder counters, or None when not recording."""
+    mission_plan: Optional[dict[str, Any]] = None
+    """The route flown: laps, expanded waypoints, injection timing. The
+    reference frame without which the coordinates below mean nothing."""
+    flight_at_attack: Optional[dict[str, Any]] = None
+    """Physical state of every UAV at the injection instant, from Gazebo
+    poses. None means NOT OBSERVED (no recorder) — never "not flying"."""
     error: Optional[str] = None
 
 
@@ -141,6 +172,10 @@ class ExperimentRunner:
         self._attack_logger: Optional[EventLogger] = None
         self._trajectory_recorder: Optional[Any] = None
         self._start_wall: float = 0.0
+        self._attack_fired_wall: Optional[float] = None
+        """Wall clock of the injection instant. Stays None if the run
+        never reached it (setup failure) — which is why the flight check
+        then reports None instead of a verdict."""
 
     # ----- public entry point -----
 
@@ -197,6 +232,12 @@ class ExperimentRunner:
         return self._finalize(error)
 
     # ----- setup -----
+
+    def _resolve_target(self) -> str:
+        """The UAV under attack. One definition, used by both the scenario
+        and the flight check — two copies of this rule could disagree and
+        silently validate the wrong vehicle."""
+        return self._target_uav or self._exp_cfg.telemetry.endpoints[0].uav_id
 
     def _setup_fleet(self) -> None:
         self._fleet = build_fleet(
@@ -271,7 +312,7 @@ class ExperimentRunner:
 
         # Arm attack (resource setup) early so failures show up before
         # mission starts.
-        target = self._target_uav or self._exp_cfg.telemetry.endpoints[0].uav_id
+        target = self._resolve_target()
         target_sysid = next(
             e.sysid for e in self._exp_cfg.telemetry.endpoints
             if e.uav_id == target
@@ -301,6 +342,14 @@ class ExperimentRunner:
             await self._mission_runner.start()
 
         await asyncio.sleep(self._attack_at)
+
+        # The injection instant, on the same wall clock as merged.jsonl
+        # events and trajectory.jsonl samples. Captured here, not derived
+        # later: fire() can block (a param set is a network round trip),
+        # and this is the axis the flight check anchors to. Set on
+        # baseline too — the nominal instant is what lets the control
+        # condition be checked by the identical procedure (thesis 3.5.5).
+        self._attack_fired_wall = time.time()
 
         # Ground-truth marker BEFORE fire: pin "attack injection started"
         # so MTTD measurement uses a definitive timestamp.
@@ -359,7 +408,9 @@ class ExperimentRunner:
                 mesh.stop()
             except Exception:
                 pass
-        # Stopped last: keeps recording through mission abort/RTL.
+        # Stopped last: keeps recording through mission abort/RTL. This
+        # also flushes and closes trajectory.jsonl, which _finalize then
+        # reads back — so the flight check must never run before this.
         if self._trajectory_recorder is not None:
             try:
                 self._trajectory_recorder.stop()
@@ -373,8 +424,42 @@ class ExperimentRunner:
 
     # ----- finalize -----
 
+    def _compute_flight_at_attack(
+        self, log_dir: Path
+    ) -> Optional[dict[str, Any]]:
+        """Read the ground-truth poses back and answer "was it flying?".
+
+        None when no recorder ran: that is "not observed", which is a
+        different fact from "not moving", and collapsing the two would put
+        a confident falsehood into the dataset. A recorder that ran but
+        produced nothing yields a populated dict with null verdicts —
+        "we looked and saw nothing" — which the analysis layer can report
+        honestly as a dropout.
+        """
+        if self._trajectory_recorder is None:
+            return None
+        samples = read_trajectory(log_dir / TRAJECTORY_FILENAME)
+        return flight_state_at(
+            samples,
+            self._attack_fired_wall,
+            target_uav=self._resolve_target(),
+        )
+
     def _finalize(self, error: Optional[str]) -> RunResult:
         duration = time.time() - self._start_wall if self._start_wall else 0.0
+
+        # Independent of the fleet, so it is recorded even for a run that
+        # died during setup: a failed run still has to say what it was
+        # trying to fly.
+        mission_plan: Optional[dict[str, Any]] = None
+        try:
+            mission_plan = mission_plan_summary(
+                self._exp_cfg.mission,
+                attack_at_sec=self._attack_at,
+                observation_after_attack_sec=self._obs_after,
+            )
+        except Exception as exc:
+            error = error or f"mission_plan: {exc}"
 
         if self._fleet is None:
             return RunResult(
@@ -385,6 +470,7 @@ class ExperimentRunner:
                 duration_sec=duration,
                 log_dir="",
                 merged_log="",
+                mission_plan=mission_plan,
                 error=error or "fleet_setup_failed",
             )
 
@@ -406,6 +492,16 @@ class ExperimentRunner:
         except Exception as exc:
             error = error or f"merge: {exc}"
 
+        # A post-hoc read of an already-finished flight. A defect here
+        # surfaces in `error` rather than raising: the flight happened and
+        # its logs are on disk, so losing a real run over a bad summary
+        # field would be the expensive failure — same contract as merge.
+        flight_at_attack: Optional[dict[str, Any]] = None
+        try:
+            flight_at_attack = self._compute_flight_at_attack(log_dir)
+        except Exception as exc:
+            error = error or f"flight_check: {exc}"
+
         monitor_stats = [m.stats for m in self._fleet.monitors]
         coordinator_stats = [c.stats for c in self._fleet.coordinators]
 
@@ -424,6 +520,8 @@ class ExperimentRunner:
                 if self._trajectory_recorder is not None
                 else None
             ),
+            mission_plan=mission_plan,
+            flight_at_attack=flight_at_attack,
             error=error,
         )
 
