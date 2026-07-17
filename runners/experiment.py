@@ -87,6 +87,7 @@ from metrics.estimator_series import (
 from metrics.belief_divergence import (
     belief_divergence as build_belief_divergence,
 )
+from metrics.mesh_cost import fleet_mesh_cost
 from metrics.flight_check import (
     flight_state_at,
     mission_plan_summary,
@@ -140,6 +141,12 @@ class RunResult:
     """True (Gazebo) vs believed (PX4 NED) position divergence per UAV,
     in metres. Diagnostic, not metric-grade — same scope rule as
     estimator_series (dies under monitor_takeout)."""
+    mesh_cost: Optional[dict[str, Any]] = None
+    """Mesh message/byte counters folded across the fleet (item 3):
+    per peer plus a fleet total, publish vs delivery, per topic. A/B
+    hold no mesh, so this is zeros there by construction. None means
+    the run died before a fleet existed — not observed, not "no
+    traffic"."""
     error: Optional[str] = None
 
 
@@ -518,6 +525,21 @@ class ExperimentRunner:
             target_uav=self._resolve_target(),
         )
 
+    def _compute_mesh_cost(self) -> Optional[dict[str, Any]]:
+        """Fold every mesh's counters into a fleet view (item 3).
+
+        Reads live MeshBus objects, not logs: the counters live on
+        the instances and survive stop(), so this runs after teardown
+        like the other post-hoc reads. A/B hold no meshes, so
+        fleet_mesh_cost([]) returns an all-zero aggregate — the
+        baseline the trade-off is measured against. No architecture
+        branch: the empty list IS the difference, expressed as data.
+        """
+        if self._fleet is None:
+            return None
+        snapshots = [mesh.mesh_counters() for mesh in self._fleet.meshes]
+        return fleet_mesh_cost(snapshots)
+
     def _finalize(self, error: Optional[str]) -> RunResult:
         duration = time.time() - self._start_wall if self._start_wall else 0.0
 
@@ -590,6 +612,12 @@ class ExperimentRunner:
         except Exception as exc:
             error = error or f"belief_divergence: {exc}"
 
+        mesh_cost: Optional[dict[str, Any]] = None
+        try:
+            mesh_cost = self._compute_mesh_cost()
+        except Exception as exc:
+            error = error or f"mesh_cost: {exc}"
+
         monitor_stats = [m.stats for m in self._fleet.monitors]
         coordinator_stats = [c.stats for c in self._fleet.coordinators]
 
@@ -612,6 +640,7 @@ class ExperimentRunner:
             flight_at_attack=flight_at_attack,
             estimator_series=estimator_series,
             belief_divergence=belief_divergence,
+            mesh_cost=mesh_cost,
             error=error,
         )
 
