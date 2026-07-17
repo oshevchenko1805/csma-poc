@@ -1333,3 +1333,117 @@ restoration vs PX4 cold-start, per §8) rather than a headline
 - `RESULTS_NOTES.md` — R7 (OPEN-1 closed), R8 (detection under motion),
   R4 extended, OPEN-3, OPEN-4, work queue
 - `runs_v3/` — 20 × `run_summary.json` + `report/`
+
+## INSTRUMENTATION 1/4 CLOSED — mission_plan + flight_at_attack
+
+Item 1 of 4 (mission plan in run_summary). Tests 526 -> 576.
+
+### What it answers
+
+"Was the UAV actually flying when the attack fired?" — now a field in
+every `run_summary.json`, not an investigation. OPEN-1 was found by
+hand-reading a Gazebo trajectory after 120 invalid runs had already been
+collected (runs_v1, runs_v2, R1-R4 all attacked a hovering UAV). The
+question was answerable only once, late, and only by hand. On the
+~1160-trial campaign that failure mode is silent and unrepeatable.
+
+### Added
+
+- `metrics/flight_check.py` — pure functions, no I/O in the computation:
+  - `flight_state_at(samples, t_wall, ...)` — per-UAV speed / altitude /
+    position at the injection instant, plus `in_motion` / `airborne` /
+    `flying` verdicts.
+  - `read_trajectory(path)` — tolerant reader (a truncated final line is
+    normal: the recorder is killed at teardown).
+  - `mission_plan_summary(mission_cfg, ...)` — laps, expanded waypoints,
+    injection timing.
+- `RunResult.mission_plan`, `RunResult.flight_at_attack`.
+- `ExperimentRunner._attack_fired_wall` — captured immediately before
+  `fire()`, on the same wall clock as merged.jsonl and trajectory.jsonl.
+- `ExperimentRunner._resolve_target()` — one definition of the target,
+  shared by the scenario and the flight check.
+
+### Decisions
+
+- **Gazebo ground truth only.** PX4's estimate is corrupted by GPS
+  spoofing by construction, and monitors are killed by the takeout
+  attacks. An answer from either would be an answer from inside the
+  system under test (thesis 3.5.5, table 3.14).
+- **Z axis: gz world frame is ENU, Z up -> `alt_m = z`, no sign flip.**
+  Measured, not assumed: `runs_v3/run_C_gps_spoofing_r16_*`, uav_0 at a
+  20 m cruise reads z = +19.81 / +20.21. The NED convention (z down) is
+  equally common in this stack and would silently invert every
+  `airborne` flag while still reading plausible. Pinned by a test.
+- **`None` != `False`.** No recorder -> `flight_at_attack: null` ("not
+  observed"). Recorder ran but captured nothing -> populated dict with
+  null verdicts ("we looked and saw nothing"). Collapsing the two would
+  put a confident falsehood into the dataset.
+- **Thresholds (0.5 m/s, 1.0 m) and window (+/-1 s) are written into the
+  JSON next to the raw numbers.** A threshold baked into code is a hidden
+  assumption a reviewer cannot audit; recorded beside its result it is
+  reproducible, and the booleans stay re-derivable from the raw speeds
+  without re-flying anything. 0.5 m/s sits inside the 50x gap measured in
+  R7 (hover 0.03 m/s, mission flight 1.5-5.1 m/s) — not tuned.
+- **Speed = path length / elapsed, not endpoint displacement.** A UAV
+  rounding a corner returns near its start; endpoint displacement would
+  read ~0 m/s and call a flying UAV hovering — precisely the failure this
+  module exists to prevent. Gazebo poses carry no sensor noise (they are
+  the physics state), so path length costs nothing in robustness.
+- **`mission_plan` is computed before the `_fleet is None` check** — a run
+  that died during setup still has to say what it was trying to fly.
+- **A flight_check defect surfaces in `error`, it does not raise** (same
+  contract as `merge_jsonl`): losing a live 160 s flight over a summary
+  field would be the expensive failure.
+- **Why run_summary and not the analyzer:** `*.jsonl` is gitignored and
+  `configs/experiment.yaml` will drift under the OPEN-2 sweeps, so a
+  committed run must be self-contained or the dataset becomes numbers
+  without units.
+- **No architecture branching.** Both functions read poses and a
+  timestamp, so the identical-measurement-procedure requirement holds by
+  construction rather than by discipline.
+
+### Deliberately not done
+
+Waypoint index is NOT resolved from position. With `laps: 5` the square
+repeats, so lap 1 and lap 3 are physically identical and a
+nearest-waypoint guess is ambiguous. Real mission progress needs PX4's
+believed item index alongside the true position — that is instrumentation
+item 2. Recording the plan now is what keeps that option open; not
+recording it would have closed it.
+
+### Live verification
+
+`runs/run_c_gps_spoofing_1784265288`, arch C, gps_spoofing, target uav_0.
+
+    plan:   laps=5, n_waypoints=20, attack_at_sec=90
+    flight: n_samples_total=2280, target_in_motion=True,
+            target_flying=True
+    uav_0 @ inject: speed_horiz=2.467 m/s, speed_3d=2.468 m/s,
+                    alt=19.986 m, x=-0.044, y=26.563,
+                    in_motion=True, airborne=True, flying=True
+                    n_samples=9, dt_sec=1.736, t_offset_sec=0.068
+
+`t_offset_sec = 0.068` is the point of the live run: it confirms the
+runner's `time.time()` and the gz bridge's `t_wall` are the same clock.
+Nothing in the test suite could establish that — the fakes derive both
+timestamps from one `time.time()`, so a clock mismatch is invisible there
+by design. Had the clocks diverged, a healthy flight would have returned
+`n_samples_total > 0` with `uav_0.n_samples: 0`, and the anchor would
+have had to move to `t_sim`.
+
+### Observation (not a blocker)
+
+The +/-1 s window caught 9 samples with dt=1.736 s -> actual recorder
+step ~0.217 s, i.e. 4.6 Hz rather than the nominal 5 Hz. Jitter in
+`gz topic --json-output`. No effect on the verdict at this window size;
+worth revisiting only if the window is ever narrowed below ~0.5 s.
+
+### Assessment
+
+Clean solution. No workarounds.
+
+### Remaining before the campaign
+
+Items 2-4: raw `pos_horiz_ratio` series + PX4 true vs believed position
+(unblocks OPEN-3), mesh cost counters, mesh loss/delay. Do not launch the
+~1160-run campaign until these are closed.
