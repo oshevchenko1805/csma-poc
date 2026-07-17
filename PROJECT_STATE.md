@@ -1629,3 +1629,305 @@ altitude held at 20 m +/- 0.2. Nothing flies crooked.
 - **4**: mesh loss/delay.
 
 Do not launch the ~1160-run campaign until these are closed.
+
+## INSTRUMENTATION 2B CLOSED — true vs believed divergence
+
+Item 2, second half. Tests 644 -> 674. Item 2 (2A + 2B) is now complete.
+Items 3 and 4 remain before the campaign.
+
+### What it answers
+
+2A recorded `pos_horiz_ratio` — the EKF's own residual, "did the filter
+notice?". It cannot say how far the belief actually moved in metres. 2B
+pairs Gazebo ground truth against PX4's believed position
+(`LOCAL_POSITION_NED`) and reports the divergence, closing the truth ->
+falsified-input -> belief triangle for the truth/belief leg. The third
+leg (GPS_RAW_INT, the geodetic input itself) is deferred — see end.
+
+### Added
+
+- `metrics/belief_divergence.py` — pure functions, no I/O in the
+  computation:
+  - `resolve_ekf_origin()` — median Gazebo pose over a UAV's pre-liftoff
+    ground block. The EKF origin is MEASURED, not taken from the
+    `PX4_GZ_MODEL_POSE = instance*5,0,0` constant.
+  - `belief_divergence()` — truth (gz ENU) -> local NED via the measured
+    axis map, paired to believed NED within +/-0.2 s, downsampled to
+    ~1 Hz, per UAV.
+- `runners/experiment.py`: `RunResult.belief_divergence`,
+  `_compute_belief_divergence()`, folded in `_finalize` beside
+  `estimator_series` with the same "error into `error`, never fail the
+  run" contract.
+
+### Decisions
+
+- **Origin measured, not configured.** Hard-coding `*5` would put a
+  deployment's fleet-spacing config inside `metrics/` and break silently
+  when spacing changes (5-7 drones, OPEN-2 sweeps). The project already
+  got an axis assumption wrong once by reasoning instead of measuring
+  (2A calibration) — same discipline here. VALIDATED on live baseline
+  below: healthy uav_1/uav_2 read sub-metre, not 5 m / 10 m.
+- **Origin from the FIRST ground block only**, not every low-z sample —
+  a later crash/landing must not pull the reference point.
+- **`None`, never (0,0,0), for an unresolved origin.** Defaulting to
+  zero is exactly the fleet-spacing bug the resolver removes.
+- **Runs on baseline too.** Unlike `estimator_series`, `belief_divergence`
+  does not require an attack anchor: the axis calibration and the EKF
+  noise floor are validated on unattacked runs, where truth == belief is
+  the only condition a frame error is distinguishable in. With an attack,
+  times are relative to injection and baseline is pre-injection; without,
+  times are relative to the first paired sample and the whole run is
+  baseline. The `anchor` field records which so zero is never ambiguous.
+  (In practice a runner-driven baseline still carries the NOMINAL
+  injection instant, so anchor="attack" there — identical measurement
+  procedure, thesis 3.5.5. The "first_sample" path fires only when the
+  instant was never captured.)
+- **Airborne threshold shared with `flight_check` by a direct assert**
+  (`test_airborne_threshold_matches_flight_check`), not two copies of
+  1.0: the same ground/airborne boundary must define "pre-liftoff" here
+  and "flying" there.
+- **`bool` rejected explicitly** (int subclass -> stray True reads as
+  1.0 m); NaN/inf dropped.
+
+### Scope — diagnostic, NOT a metric source
+
+Same rule as 2A: the believed channel comes from a monitor inside the
+system under test and dies under `monitor_takeout`, so its availability
+is architecture-dependent. Nothing in table 3.13 may be computed from it
+(thesis 3.5.5, 3.5.4). Metric-grade ground truth stays with Gazebo.
+
+### Live verification
+
+Baseline `runs/run_c_none_1784288796`, arch C, no attack:
+
+    origins:  uav_0 x=-0.0  uav_1 x=5.0  uav_2 x=10.0   (spawn offset caught)
+    baseline_median_horiz_m:  0.228 / 0.179 / 0.077     (all sub-metre)
+    peaks ~1-2 m, scattered in time (incl. pre-injection and +57 s on a
+    run with NO attack) — single-sample stitching artefacts on corners
+    (gz 4.6 Hz vs believed 30 Hz, +/-0.2 s at ~4 m/s), NOT signal. This
+    is the baseline noise ceiling.
+
+The 5 m / 10 m spawn offset is REMOVED by the measured origin. The
+"origin must be subtracted from data" item is now a confirmed fact on a
+real flight, not a hypothesis.
+
+Attack `runs/run_c_gps_spoofing_1784289089`, arch C, gps_spoofing,
+target uav_0, `SIM_GPS_OFF_N=50`:
+
+    uav_0:  peak_horiz_m = 50.03 @ t_rel +55.9   (== the injected offset)
+    uav_1:  peak 1.01     uav_2: 0.95            (baseline, not attacked)
+    ratio uav_0: peak 2.0, n_above 6, max_consec 6, first_cross +1.374
+
+### The triangle (explains R9)
+
+The belief was CAPTURED: LOCAL_POSITION_NED converged to the full 50 m
+spoof offset. Timeline read across both series in one summary:
+
+- `ratio` (innovation): spikes at onset (+1.374 s), sustains 6 samples,
+  then collapses (R9: 2.0 -> 0.0007).
+- `belief_divergence` (consequence): grows to the full 50 m by +55.9 s.
+
+Mechanism: the residual is the gap between prediction and input. It
+flares on the spoof onset, but once the EKF accepts the spoof and its
+state converges to the spoofed position the residual falls to zero (the
+filter now "believes" the spoof) while the true belief-vs-truth error
+grows to the full injected offset. The detector therefore fires on the
+onset transient only — consistent with the documented signature. 2B
+separates detection latency (MTTD, onset ~1.4 s) from corruption
+magnitude (50 m, peak +56 s): different axes that were previously
+conflated.
+
+### Remaining before the campaign
+
+- **3**: mesh cost counters.
+- **4**: mesh loss/delay.
+- **2B third leg (deferred, not blocking):** GPS_RAW_INT is geodetic
+  (lat/lon 1e7 deg); comparing it to NED metres needs the EKF origin in
+  lat/lon. The raw channel is already recorded, so this needs no
+  re-flying whenever it is picked up.
+
+Items 3 and 4 touch the mesh — the system under test — unlike 1/2 where
+the risk was zero. An error there corrupts the already-validated
+runs_v1/runs_v3. Do not launch the ~1160-run campaign until they close.
+
+## INSTRUMENTATION 2B CLOSED — true vs believed divergence
+
+Item 2, second half. Tests 644 -> 674. Item 2 (2A + 2B) is now complete.
+Items 3 and 4 remain before the campaign.
+
+### What it answers
+
+2A recorded `pos_horiz_ratio` — the EKF's own residual, "did the filter
+notice?". It cannot say how far the belief actually moved in metres. 2B
+pairs Gazebo ground truth against PX4's believed position
+(`LOCAL_POSITION_NED`) and reports the divergence, closing the truth ->
+falsified-input -> belief triangle for the truth/belief leg. The third
+leg (GPS_RAW_INT, the geodetic input itself) is deferred — see end.
+
+### Added
+
+- `metrics/belief_divergence.py` — pure functions, no I/O in the
+  computation:
+  - `resolve_ekf_origin()` — median Gazebo pose over a UAV's pre-liftoff
+    ground block. The EKF origin is MEASURED, not taken from the
+    `PX4_GZ_MODEL_POSE = instance*5,0,0` constant.
+  - `belief_divergence()` — truth (gz ENU) -> local NED via the measured
+    axis map, paired to believed NED within +/-0.2 s, downsampled to
+    ~1 Hz, per UAV.
+- `runners/experiment.py`: `RunResult.belief_divergence`,
+  `_compute_belief_divergence()`, folded in `_finalize` beside
+  `estimator_series` with the same "error into `error`, never fail the
+  run" contract.
+
+### Decisions
+
+- **Origin measured, not configured.** Hard-coding `*5` would put a
+  deployment's fleet-spacing config inside `metrics/` and break silently
+  when spacing changes (5-7 drones, OPEN-2 sweeps). The project already
+  got an axis assumption wrong once by reasoning instead of measuring
+  (2A calibration) — same discipline here. VALIDATED on live baseline
+  below: healthy uav_1/uav_2 read sub-metre, not 5 m / 10 m.
+- **Origin from the FIRST ground block only**, not every low-z sample —
+  a later crash/landing must not pull the reference point.
+- **`None`, never (0,0,0), for an unresolved origin.** Defaulting to
+  zero is exactly the fleet-spacing bug the resolver removes.
+- **Runs on baseline too.** Unlike `estimator_series`, `belief_divergence`
+  does not require an attack anchor: the axis calibration and the EKF
+  noise floor are validated on unattacked runs, where truth == belief is
+  the only condition a frame error is distinguishable in. With an attack,
+  times are relative to injection and baseline is pre-injection; without,
+  times are relative to the first paired sample and the whole run is
+  baseline. The `anchor` field records which so zero is never ambiguous.
+  (In practice a runner-driven baseline still carries the NOMINAL
+  injection instant, so anchor="attack" there — identical measurement
+  procedure, thesis 3.5.5. The "first_sample" path fires only when the
+  instant was never captured.)
+- **Airborne threshold shared with `flight_check` by a direct assert**
+  (`test_airborne_threshold_matches_flight_check`), not two copies of
+  1.0: the same ground/airborne boundary must define "pre-liftoff" here
+  and "flying" there.
+- **`bool` rejected explicitly** (int subclass -> stray True reads as
+  1.0 m); NaN/inf dropped.
+
+### Scope — diagnostic, NOT a metric source
+
+Same rule as 2A: the believed channel comes from a monitor inside the
+system under test and dies under `monitor_takeout`, so its availability
+is architecture-dependent. Nothing in table 3.13 may be computed from it
+(thesis 3.5.5, 3.5.4). Metric-grade ground truth stays with Gazebo.
+
+### Live verification
+
+Baseline `runs/run_c_none_1784288796`, arch C, no attack:
+
+    origins:  uav_0 x=-0.0  uav_1 x=5.0  uav_2 x=10.0   (spawn offset caught)
+    baseline_median_horiz_m:  0.228 / 0.179 / 0.077     (all sub-metre)
+    peaks ~1-2 m, scattered in time (incl. pre-injection and +57 s on a
+    run with NO attack) — single-sample stitching artefacts on corners
+    (gz 4.6 Hz vs believed 30 Hz, +/-0.2 s at ~4 m/s), NOT signal. This
+    is the baseline noise ceiling.
+
+The 5 m / 10 m spawn offset is REMOVED by the measured origin. The
+"origin must be subtracted from data" item is now a confirmed fact on a
+real flight, not a hypothesis.
+
+Attack `runs/run_c_gps_spoofing_1784289089`, arch C, gps_spoofing,
+target uav_0, `SIM_GPS_OFF_N=50`:
+
+    uav_0:  peak_horiz_m = 50.03 @ t_rel +55.9   (== the injected offset)
+    uav_1:  peak 1.01     uav_2: 0.95            (baseline, not attacked)
+    ratio uav_0: peak 2.0, n_above 6, max_consec 6, first_cross +1.374
+
+### The triangle (explains R9)
+
+The belief was CAPTURED: LOCAL_POSITION_NED converged to the full 50 m
+spoof offset. Timeline read across both series in one summary:
+
+- `ratio` (innovation): spikes at onset (+1.374 s), sustains 6 samples,
+  then collapses (R9: 2.0 -> 0.0007).
+- `belief_divergence` (consequence): grows to the full 50 m by +55.9 s.
+
+Mechanism: the residual is the gap between prediction and input. It
+flares on the spoof onset, but once the EKF accepts the spoof and its
+state converges to the spoofed position the residual falls to zero (the
+filter now "believes" the spoof) while the true belief-vs-truth error
+grows to the full injected offset. The detector therefore fires on the
+onset transient only — consistent with the documented signature. 2B
+separates detection latency (MTTD, onset ~1.4 s) from corruption
+magnitude (50 m, peak +56 s): different axes that were previously
+conflated.
+
+### Remaining before the campaign
+
+- **3**: mesh cost counters.
+- **4**: mesh loss/delay.
+- **2B third leg (deferred, not blocking):** GPS_RAW_INT is geodetic
+  (lat/lon 1e7 deg); comparing it to NED metres needs the EKF origin in
+  lat/lon. The raw channel is already recorded, so this needs no
+  re-flying whenever it is picked up.
+
+Items 3 and 4 touch the mesh — the system under test — unlike 1/2 where
+the risk was zero. An error there corrupts the already-validated
+runs_v1/runs_v3. Do not launch the ~1160-run campaign until they close.
+
+## INSTRUMENTATION 2B CLOSED — true vs believed divergence in run_summary
+
+Item 2, second half. Item 2 (2A + 2B) is now complete. Tests 644 -> 674.
+
+### Added
+
+- `metrics/belief_divergence.py` — pure functions, no I/O in the maths:
+  - `resolve_ekf_origin()` — median Gazebo pose over a UAV's
+    chronologically-first pre-liftoff ground block. Measured, not the
+    `instance*5` constant. None (never (0,0,0)) when no ground sample
+    exists.
+  - `belief_divergence()` — pairs believed LOCAL_POSITION_NED against
+    Gazebo truth mapped into NED (north=gz.y-oy, east=gz.x-ox,
+    down=-(gz.z-oz)), ±0.2 s tolerance, downsampled to ~1 Hz. Works with
+    OR without an attack anchor; the `anchor` field records which.
+- `runners/experiment.py`: `RunResult.belief_divergence`,
+  `_compute_belief_divergence`, folded in `_finalize` after the detector
+  loop with the same "errors go to `error`, never fail the run" contract
+  as flight_check / estimator_series.
+
+### Decisions
+
+- **Origin measured, not configured.** This module is architecture-blind
+  and has no business knowing fleet-spacing config; and the project got
+  an axis assumption wrong once by reasoning instead of measuring (2A
+  calibration). Validated live: baseline origins recovered 0/5/10 m
+  exactly and healthy medians are sub-metre — a hardcoded `*5` would have
+  been correct here but silently wrong under any future re-spacing (the
+  5-7 drone step).
+- **First pre-liftoff block only**, not all low-z samples: a later crash
+  or landing must not pull the origin. Confirmed on real data — the
+  recorder starts on the ground (z ≈ -0.013), so the block exists.
+- **airborne threshold pinned to flight_check** by a direct equality
+  test, not a second copy of the literal 1.0.
+- **No anchor requirement** (unlike estimator_series): a working baseline
+  is the ONLY condition where a frame error is distinguishable from a
+  real spoof (truth == belief there). In practice the runner supplies the
+  nominal instant even on baseline, so anchor is "attack"; the
+  "first_sample" fallback fires only when the instant was never captured.
+
+### Live verification
+
+Matched pair, arch C, gps_spoofing, target uav_0, SIM_GPS_OFF_N=50:
+
+- baseline `run_c_none_1784288796`: origins x = -0.0 / 5.0 / 10.0,
+  medians 0.228 / 0.179 / 0.077 m. Spawn offset removed. Peaks 1-2 m are
+  cornering/stitching artefacts (scatter across the run, incl.
+  pre-injection and +57 s on a no-attack run) — baseline ceiling ~2 m.
+- attack `run_c_gps_spoofing_1784289089`: uav_0 peak 50.03 m @ +55.9 s
+  (== the injected offset; EKF fused the spoof), uav_1/uav_2 at baseline.
+  Alongside pos_horiz_ratio (first_cross +1.374 s, collapse per R9) this
+  closes the truth -> input -> belief triangle. See RESULTS_NOTES R10.
+
+### Not done
+
+- Third leg: GPS_RAW_INT (the falsified input, geodetic) — deferred.
+- Items 3 (mesh cost counters) and 4 (mesh loss/delay). Unlike 1/2 they
+  touch the system under test — a defect there corrupts the already-
+  validated runs_v1/runs_v3. Design them in a fresh chat.
+
+Do not launch the ~1160-run campaign until 3 and 4 are closed.

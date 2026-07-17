@@ -757,3 +757,216 @@ class TestEstimatorSeries:
         assert result.error is not None
         assert "estimator_series" in result.error
         assert Path(result.merged_log).exists()
+
+
+# ---------------------------------------------------------------------------
+# True-vs-believed divergence (item 2B)
+#
+# estimator_series answers "did the filter notice?"; belief_divergence
+# answers "how far off was the belief, in metres?" — Gazebo truth paired
+# against PX4's LOCAL_POSITION_NED. It rides the same per-monitor
+# telemetry logs, so these wiring tests only prove the pipe reaches
+# run_summary.json; the axis/pairing maths is pinned in
+# test_belief_divergence.py.
+# ---------------------------------------------------------------------------
+
+
+class BeliefConnection:
+    """Emits a steady LOCAL_POSITION_NED stream for one UAV.
+
+    Believes it is at a fixed (north, east, down). Paired against a
+    ground-truth recorder that flies the UAV to gz.y=30 (== 30 m north of
+    its spawn), a belief of north=0 reads as 30 m of horizontal
+    divergence — enough to prove the axis map survives the round trip
+    through the runner.
+    """
+
+    def __init__(
+        self, *, sysid: int, north: float = 0.0, east: float = 0.0,
+        down: float = -20.0,
+    ) -> None:
+        self._sysid = sysid
+        self._n = north
+        self._e = east
+        self._d = down
+        self._closed = False
+        self.sent = 0
+
+    def recv_match(self, type=None, blocking: bool = True, timeout: float = 1.0):
+        if self._closed:
+            return None
+        allowed = None
+        if type is not None:
+            allowed = {type} if isinstance(type, str) else set(type)
+        if allowed is not None and "LOCAL_POSITION_NED" not in allowed:
+            time.sleep(min(timeout, 0.05))
+            return None
+        time.sleep(0.02)
+        self.sent += 1
+        return FakeMessage(
+            "LOCAL_POSITION_NED",
+            self._sysid,
+            {"x": self._n, "y": self._e, "z": self._d},
+        )
+
+    def close(self) -> None:
+        self._closed = True
+
+
+class FakeBeliefRecorder:
+    """Ground-truth trajectory with a pre-liftoff block (for the EKF
+    origin) followed by flight to gz.y=30 around 'now' (for pairing).
+
+    Ground block sits at wall now-3.0.. so it never falls in the belief
+    stream's live window; only the flight samples pair.
+    """
+
+    def __init__(self, out_path: Path, *, gz_y_flight: float = 30.0) -> None:
+        self.out_path = out_path
+        self.stopped = False
+        self._gz_y = gz_y_flight
+        self.stats = {"samples_written": 0}
+
+    def start(self) -> None:
+        now = time.time()
+        lines = []
+        # pre-liftoff ground block: spawn at gz (10*u, 0, 0)
+        for i in range(3):
+            t = now - 3.0 + i * 0.1
+            for u in range(3):
+                lines.append(json.dumps({
+                    "t_wall": t, "t_sim": 10.0 + i * 0.1,
+                    "uav_id": f"uav_{u}", "x": 10.0 * u, "y": 0.0, "z": 0.0,
+                }))
+        # flight around now: gz (10*u, gz_y, 20) -> 30 m north of spawn
+        for i in range(31):
+            t = now - 1.0 + i * 0.1
+            for u in range(3):
+                lines.append(json.dumps({
+                    "t_wall": t, "t_sim": 100.0 + i * 0.1,
+                    "uav_id": f"uav_{u}", "x": 10.0 * u, "y": self._gz_y,
+                    "z": 20.0,
+                }))
+        self.out_path.write_text("\n".join(lines) + "\n")
+        self.stats["samples_written"] = len(lines)
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+def _belief_runner(tmp_path: Path, arch: str = "a", *, attack=None):
+    """A runner whose connections emit LOCAL_POSITION_NED, with the
+    ground-truth belief recorder wired in."""
+    arch_cfg = load_architecture_config(CONFIG_DIR / f"architecture_{arch}.yaml")
+    exp_cfg = load_experiment_config(CONFIG_DIR / "experiment.yaml")
+    sysid_by_endpoint = {
+        e.endpoint: e.sysid for e in exp_cfg.telemetry.endpoints
+    }
+
+    def conn_factory(endpoint: str):
+        return BeliefConnection(sysid=sysid_by_endpoint[endpoint])
+
+    runner = ExperimentRunner(
+        arch_cfg=arch_cfg, exp_cfg=exp_cfg, run_id="test", log_root=tmp_path,
+        attack_injector=attack,
+        mission_runner=NullMissionRunner(duration_sec=0.5),
+        attack_at_sec=0.1, observation_after_attack_sec=0.2,
+        connection_factory=conn_factory, mesh_factory=_noop_mesh_factory,
+    )
+    runner._trajectory_recorder_factory = lambda p: FakeBeliefRecorder(p)
+    return runner
+
+
+class TestBeliefDivergence:
+    def test_divergence_recorded_per_uav(self, tmp_path: Path):
+        result = _belief_runner(
+            tmp_path, "c", attack=RecordingInjector()
+        ).run()
+        bd = result.belief_divergence
+        assert bd is not None
+        assert set(bd["uavs"]) == {"uav_0", "uav_1", "uav_2"}
+        assert bd["target_uav"] == "uav_0"
+        assert bd["belief_msg_type"] == "LOCAL_POSITION_NED"
+
+    def test_axis_map_survives_the_round_trip(self, tmp_path: Path):
+        # 30 m north in Gazebo, belief frozen at north=0 -> 30 m horizontal
+        # divergence, and the spawn spacing (0/5/10... here 0/10/20 m east)
+        # must be removed by the measured origin, not leak in as false
+        # divergence.
+        result = _belief_runner(
+            tmp_path, "a", attack=RecordingInjector()
+        ).run()
+        u0 = result.belief_divergence["uavs"]["uav_0"]
+        assert u0["origin"] is not None
+        assert u0["n"] > 0
+        assert u0["peak_horiz_m"] == pytest.approx(30.0, abs=0.5)
+        # uav_2 spawns 20 m east; a resolver that ignored spawn offset
+        # would add 20 m here. It must still read ~30, not ~36.
+        u2 = result.belief_divergence["uavs"]["uav_2"]
+        assert u2["peak_horiz_m"] == pytest.approx(30.0, abs=0.5)
+
+    def test_no_recorder_means_none(self, tmp_path: Path):
+        # No ground truth -> nothing to diverge from. None, not an empty
+        # dict pretending to a measurement.
+        arch_cfg = load_architecture_config(
+            CONFIG_DIR / "architecture_a.yaml"
+        )
+        exp_cfg = load_experiment_config(CONFIG_DIR / "experiment.yaml")
+        sysid_by_endpoint = {
+            e.endpoint: e.sysid for e in exp_cfg.telemetry.endpoints
+        }
+        runner = ExperimentRunner(
+            arch_cfg=arch_cfg, exp_cfg=exp_cfg, run_id="test",
+            log_root=tmp_path, attack_injector=RecordingInjector(),
+            mission_runner=NullMissionRunner(duration_sec=0.5),
+            attack_at_sec=0.1, observation_after_attack_sec=0.2,
+            connection_factory=lambda ep: BeliefConnection(
+                sysid=sysid_by_endpoint[ep]
+            ),
+            mesh_factory=_noop_mesh_factory,
+        )
+        result = runner.run()
+        assert result.belief_divergence is None
+
+    def test_recorded_on_baseline_too(self, tmp_path: Path):
+        # Baseline has no attack, but it carries the NOMINAL injection
+        # instant and is validated by the identical procedure as the
+        # attack runs (thesis 3.5.5) — same as estimator_series and
+        # flight_check. So the anchor is "attack" here too; the
+        # "first_sample" fallback only fires when the instant was never
+        # captured, which is covered directly in test_belief_divergence.py.
+        # This is the condition the axis map and EKF noise floor are
+        # validated on (PROJECT_STATE 2A calibration).
+        result = _belief_runner(tmp_path, "a").run()
+        assert result.attack_name == "none"
+        bd = result.belief_divergence
+        assert bd["attack_at_wall"] is not None
+        assert bd["uavs"]["uav_0"]["anchor"] == "attack"
+        assert bd["uavs"]["uav_0"]["n"] > 0
+
+    def test_in_summary_json(self, tmp_path: Path):
+        result = _belief_runner(
+            tmp_path, "a", attack=RecordingInjector()
+        ).run()
+        data = json.loads(
+            (Path(result.log_dir) / "run_summary.json").read_text()
+        )
+        bd = data["belief_divergence"]
+        assert bd["belief_msg_type"] == "LOCAL_POSITION_NED"
+        assert bd["truth_frame"] == "gazebo_world_enu_z_up"
+        assert isinstance(
+            bd["uavs"]["uav_0"]["divergence_horiz_m"], list
+        )
+
+    def test_never_fails_a_run(self, tmp_path: Path):
+        # A summary field is not worth losing a 160 s flight over — same
+        # contract as flight_check and estimator_series.
+        runner = _belief_runner(tmp_path, "a", attack=RecordingInjector())
+        runner._compute_belief_divergence = lambda _d: (
+            _ for _ in ()
+        ).throw(RuntimeError("boom"))
+        result = runner.run()
+        assert result.belief_divergence is None
+        assert result.error is not None
+        assert "belief_divergence" in result.error
+        assert Path(result.merged_log).exists()

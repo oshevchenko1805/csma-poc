@@ -84,6 +84,9 @@ from metrics.estimator_series import (
     estimator_series as build_estimator_series,
     read_telemetry,
 )
+from metrics.belief_divergence import (
+    belief_divergence as build_belief_divergence,
+)
 from metrics.flight_check import (
     flight_state_at,
     mission_plan_summary,
@@ -133,6 +136,10 @@ class RunResult:
     estimator_series: Optional[dict[str, Any]] = None
     """Raw EKF residual series per UAV, anchored to the injection
     instant. Diagnostic, not metric-grade — see module docstring."""
+    belief_divergence: Optional[dict[str, Any]] = None
+    """True (Gazebo) vs believed (PX4 NED) position divergence per UAV,
+    in metres. Diagnostic, not metric-grade — same scope rule as
+    estimator_series (dies under monitor_takeout)."""
     error: Optional[str] = None
 
 
@@ -483,6 +490,34 @@ class ExperimentRunner:
             target_uav=self._resolve_target(),
         )
 
+    def _compute_belief_divergence(
+        self, log_dir: Path
+    ) -> Optional[dict[str, Any]]:
+        """Pair Gazebo truth against PX4's believed NED, per UAV.
+
+        None when no trajectory recorder ran: without ground truth there
+        is nothing to diverge from. The believed side is read from the
+        same per-monitor telemetry logs estimator_series folds; a killed
+        monitor simply contributes fewer samples, which is the
+        observation, not an error. Unlike estimator_series this runs on
+        baseline (unattacked) runs too — that is where the EKF noise floor
+        and the axis calibration are validated (attack_at_wall is None
+        there, which belief_divergence handles by anchoring to the first
+        paired sample).
+        """
+        if self._trajectory_recorder is None:
+            return None
+        traj = read_trajectory(log_dir / TRAJECTORY_FILENAME)
+        tele: list[dict[str, Any]] = []
+        for path in sorted(log_dir.glob(f"{TELEMETRY_LOG_PREFIX}*.jsonl")):
+            tele.extend(read_telemetry(path))
+        return build_belief_divergence(
+            traj,
+            tele,
+            self._attack_fired_wall,
+            target_uav=self._resolve_target(),
+        )
+
     def _finalize(self, error: Optional[str]) -> RunResult:
         duration = time.time() - self._start_wall if self._start_wall else 0.0
 
@@ -549,6 +584,12 @@ class ExperimentRunner:
         except Exception as exc:
             error = error or f"estimator_series: {exc}"
 
+        belief_divergence: Optional[dict[str, Any]] = None
+        try:
+            belief_divergence = self._compute_belief_divergence(log_dir)
+        except Exception as exc:
+            error = error or f"belief_divergence: {exc}"
+
         monitor_stats = [m.stats for m in self._fleet.monitors]
         coordinator_stats = [c.stats for c in self._fleet.coordinators]
 
@@ -570,6 +611,7 @@ class ExperimentRunner:
             mission_plan=mission_plan,
             flight_at_attack=flight_at_attack,
             estimator_series=estimator_series,
+            belief_divergence=belief_divergence,
             error=error,
         )
 
