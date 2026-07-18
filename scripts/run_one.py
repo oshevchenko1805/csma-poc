@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -59,6 +60,7 @@ from attacks.monitor_takeout import MonitorTakeoutInjector  # noqa: E402
 from runners.trajectory import TrajectoryRecorder  # noqa: E402
 from attacks.composite import SequentialAttackInjector  # noqa: E402
 from core.config import (  # noqa: E402
+    ConfigError,
     ExperimentConfig,
     load_architecture_config,
     load_experiment_config,
@@ -155,6 +157,34 @@ ATTACK_FACTORIES: dict[str, Callable[[], AttackInjector]] = {
 # ---------------------------------------------------------------------------
 
 
+def apply_mesh_override(arch_cfg, *, loss_prob, loss_seed):
+    """Override mesh loss_prob/loss_seed from the CLI (loss sweep).
+
+    Normally these come from architecture_c.yaml. Overriding per
+    trial keeps the configured value in the run command / batch
+    manifest (provenance) and never mutates the tracked YAML.
+    Returns arch_cfg unchanged when both overrides are None.
+
+    Raises ConfigError if loss would apply to a disabled (noop)
+    mesh -- loss is meaningful only on architecture C. MeshConfig's
+    own __post_init__ range-checks loss_prob in [0.0, 1.0].
+    """
+    if loss_prob is None and loss_seed is None:
+        return arch_cfg
+    new_loss_prob = arch_cfg.mesh.loss_prob if loss_prob is None else loss_prob
+    if new_loss_prob > 0.0 and not arch_cfg.mesh.enabled:
+        raise ConfigError(
+            "--mesh-loss-prob>0 requires an enabled mesh "
+            "(architecture C); got architecture "
+            f"{arch_cfg.architecture!r} with mesh disabled"
+        )
+    new_loss_seed = arch_cfg.mesh.loss_seed if loss_seed is None else loss_seed
+    new_mesh = replace(
+        arch_cfg.mesh, loss_prob=new_loss_prob, loss_seed=new_loss_seed
+    )
+    return replace(arch_cfg, mesh=new_mesh)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Run one CSMA experiment trial against live PX4 SITL.",
@@ -231,6 +261,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="build everything but don't actually run() — useful for smoke-testing wiring",
+    )
+    p.add_argument(
+        "--mesh-loss-prob",
+        type=float,
+        default=None,
+        help=(
+            "override mesh Bernoulli erasure loss probability "
+            "[0.0-1.0] for this trial (loss sweep). Requires "
+            "architecture C. Default: architecture_c.yaml (0.0)."
+        ),
+    )
+    p.add_argument(
+        "--mesh-loss-seed",
+        type=int,
+        default=None,
+        help=(
+            "override mesh loss RNG seed for this trial. Makes "
+            "UNIT tests deterministic; live runs stay stochastic "
+            "(TCP timing). Default: architecture_c.yaml (none)."
+        ),
     )
     return p.parse_args(argv)
 
@@ -386,6 +436,11 @@ def main(argv: list[str] | None = None) -> int:
     exp_path = CONFIGS_DIR / "experiment.yaml"
     arch_cfg = load_architecture_config(arch_path)
     exp_cfg = load_experiment_config(exp_path)
+    arch_cfg = apply_mesh_override(
+        arch_cfg,
+        loss_prob=args.mesh_loss_prob,
+        loss_seed=args.mesh_loss_seed,
+    )
 
     run_id = args.run_id or f"{args.arch}_{args.attack}_{int(time.time())}"
     log_root = Path(args.log_root).resolve()
