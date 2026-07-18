@@ -48,6 +48,17 @@ ambient, non-adversarial channel quality the mesh runs over; the attack
 sits on top of it. Dropped frames are tallied separately (`dropped`), so
 realized loss = dropped / (delivered + dropped) is measurable from
 run_summary. Default loss_prob 0.0 is a strict no-op.
+
+ZmqMesh can also add a constant per-frame delivery delay (`delay_sec`) to
+emulate channel latency. It is applied AFTER the arrival tally (the frame
+crossed the wire on time; only its dispatch to subscribers is deferred),
+by queueing the frame in the receiver thread and dispatching it once due —
+so the poll loop never blocks and throughput is preserved. Default 0.0 is
+a strict no-op (inline dispatch, no queue). NOTE (thesis Ch.5): mesh
+latency of tens-to-hundreds of ms sits well below this PoC's dominant
+latencies — the ~1 Hz ESTIMATOR_STATUS detector floor and the seconds-long
+PX4 restart — so delay is expected to be a low-impact axis; a flat sweep
+is itself the honest finding that the mesh is not the bottleneck.
 """
 
 from __future__ import annotations
@@ -56,6 +67,7 @@ import json
 import random
 import threading
 import time
+from collections import deque
 from abc import ABC, abstractmethod
 from typing import Callable, Optional
 
@@ -240,6 +252,11 @@ class ZmqMesh(MeshBus):
                             bit-identical (TCP arrival timing is not
                             deterministic). Reproducibility of a treatment
                             comes from N repetitions at a fixed loss_prob.
+    delay_sec               Constant per-frame delivery delay (item 4b).
+                            0.0 (default) is a strict no-op: frames are
+                            dispatched inline, no queue is used. >0 queues
+                            each frame and dispatches it once due, on the
+                            receiver thread, without blocking the poll loop.
 
     Threading model:
         A daemon thread runs a poll loop on the SUB socket. Incoming
@@ -266,6 +283,7 @@ class ZmqMesh(MeshBus):
         slow_joiner_delay_sec: float = 0.3,
         loss_prob: float = 0.0,
         rng_seed: Optional[int] = None,
+        delay_sec: float = 0.0,
     ) -> None:
         self.self_endpoint = self_endpoint
         self.peer_endpoints = list(peer_endpoints)
@@ -278,6 +296,14 @@ class ZmqMesh(MeshBus):
         # so it needs no lock. See class docstring on what the seed does
         # and does not guarantee.
         self._rng = random.Random(rng_seed)
+
+        self._delay_sec = float(delay_sec)
+        if self._delay_sec < 0.0:
+            raise ValueError("delay_sec must be >= 0.0")
+        # Queue of (due_monotonic, topic, event) for delayed dispatch.
+        # Touched ONLY by the receiver thread, so no lock. Never used while
+        # delay_sec == 0.0 (frames dispatch inline).
+        self._delay_queue: "deque" = deque()
 
         # Late import so NoOpMesh users on minimal envs don't need pyzmq.
         import zmq
@@ -394,60 +420,98 @@ class ZmqMesh(MeshBus):
         poller = self._zmq.Poller()
         poller.register(self._sub, self._zmq.POLLIN)
 
+        # Finer poll cadence when a delay is active so queued frames mature on
+        # time; the default (delayless) path keeps the original 200 ms cadence
+        # and thus the exact same idle behaviour as before.
+        poll_timeout_ms = 20 if self._delay_sec > 0.0 else 200
+
         while not self._stop_event.is_set():
             try:
-                socks = dict(poller.poll(timeout=200))  # ms
+                socks = dict(poller.poll(timeout=poll_timeout_ms))  # ms
             except self._zmq.ZMQError:
                 # Context terminating during shutdown.
                 break
 
-            if self._sub not in socks:
-                continue
-
-            try:
-                parts = self._sub.recv_multipart(flags=self._zmq.NOBLOCK)
-            except self._zmq.Again:
-                continue
-            except self._zmq.ZMQError:
-                break
-
-            if len(parts) != 2:
-                continue  # malformed frame
-
-            topic_b, payload_b = parts
-            try:
-                topic = topic_b.decode("utf-8")
-                event = event_from_json(payload_b.decode("utf-8"))
-            except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
-                # Don't crash a peer because someone sent garbage.
-                continue
-
-            # Channel degradation (item 4): independent Bernoulli erasure per
-            # received frame. Guarded so loss_prob == 0.0 is a strict no-op —
-            # the RNG is never even sampled and delivery is bit-for-bit as
-            # before. An erased frame is tallied as `dropped` (not delivered)
-            # and never dispatched, so realized loss is measurable and the
-            # loss knob is self-verifying (delivered falls below published x
-            # fanout). rng lives on this thread only, so no lock needed.
-            if self._loss_prob > 0.0 and self._rng.random() < self._loss_prob:
-                self._tally(
-                    self._dropped_tally, topic, len(topic_b) + len(payload_b)
-                )
-                continue
-
-            # Count the frame that actually arrived on the wire, before
-            # dispatch: delivery cost is a property of the network, not of
-            # how many subscribers happen to be attached to this topic.
-            self._tally(self._delivered_tally, topic, len(topic_b) + len(payload_b))
-
-            with self._cb_lock:
-                callbacks = list(self._callbacks.get(topic, []))
-
-            for cb in callbacks:
+            if self._sub in socks:
                 try:
-                    cb(event)
-                except Exception:
-                    # A buggy callback must not kill the receiver thread.
-                    # Subscribers are expected to handle and log their own
-                    # errors; we intentionally swallow here.
-                    pass
+                    parts = self._sub.recv_multipart(flags=self._zmq.NOBLOCK)
+                except self._zmq.Again:
+                    parts = None
+                except self._zmq.ZMQError:
+                    break
+                if parts is not None:
+                    self._handle_frame(parts)
+
+            # Drain matured delayed frames every iteration — even when no new
+            # frame arrived this cycle, or a queued one would wait for the
+            # next arrival. No-op (and no queue) while delay_sec == 0.0.
+            if self._delay_sec > 0.0:
+                self._drain_due()
+
+        # Frames still queued at stop() are discarded: the run is over.
+
+    def _handle_frame(self, parts: list) -> None:
+        """Decode one received frame, apply loss, count it, and either
+        dispatch it now or queue it for delayed dispatch."""
+        if len(parts) != 2:
+            return  # malformed frame
+
+        topic_b, payload_b = parts
+        try:
+            topic = topic_b.decode("utf-8")
+            event = event_from_json(payload_b.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            # Don't crash a peer because someone sent garbage.
+            return
+
+        nbytes = len(topic_b) + len(payload_b)
+
+        # Channel loss (item 4a): independent Bernoulli erasure per received
+        # frame. Guarded so loss_prob == 0.0 is a strict no-op — the RNG is
+        # never even sampled. An erased frame is tallied as `dropped` (not
+        # delivered) and never dispatched, so realized loss is measurable and
+        # self-verifying (delivered falls below published x fanout). rng lives
+        # on this thread only, so no lock needed.
+        if self._loss_prob > 0.0 and self._rng.random() < self._loss_prob:
+            self._tally(self._dropped_tally, topic, nbytes)
+            return
+
+        # Count the frame that actually arrived on the wire, BEFORE any delay:
+        # delivery cost is a property of the network and the frame crossed the
+        # wire on time; delay only defers when subscribers see it.
+        self._tally(self._delivered_tally, topic, nbytes)
+
+        # Channel delay (item 4b): 0.0 dispatches inline (bit-for-bit as
+        # before); >0 queues for the drain loop to release once due.
+        if self._delay_sec > 0.0:
+            self._delay_queue.append(
+                (time.monotonic() + self._delay_sec, topic, event)
+            )
+        else:
+            self._dispatch(topic, event)
+
+    def _drain_due(self) -> None:
+        """Dispatch every queued frame whose delay has elapsed.
+
+        Constant delay + arrival-order appends make due times monotonic, so
+        the head of the deque is always the earliest — FIFO holds without a
+        heap.
+        """
+        now = time.monotonic()
+        q = self._delay_queue
+        while q and q[0][0] <= now:
+            _, topic, event = q.popleft()
+            self._dispatch(topic, event)
+
+    def _dispatch(self, topic: str, event: BaseEvent) -> None:
+        """Deliver one event to every subscriber on its topic."""
+        with self._cb_lock:
+            callbacks = list(self._callbacks.get(topic, []))
+        for cb in callbacks:
+            try:
+                cb(event)
+            except Exception:
+                # A buggy callback must not kill the receiver thread.
+                # Subscribers are expected to handle and log their own
+                # errors; we intentionally swallow here.
+                pass
