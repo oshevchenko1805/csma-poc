@@ -73,11 +73,12 @@ via a ParamWriter (step 10e); it needs no gRPC port of its own. Layout:
 from __future__ import annotations
 
 import os
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from core.config import ArchitectureConfig, ExperimentConfig
+from core.config import ArchitectureConfig, ExperimentConfig, MeshConfig
 from core.events import IsolationAnnounce  # noqa: F401  (used in callbacks)
 from core.mesh import MeshBus, NoOpMesh, ZmqMesh
 from decision.isolation import IsolationDecider
@@ -263,6 +264,39 @@ def _default_mesh_factory(
     )
 
 
+def _derive_peer_seed(base: Optional[int], self_endpoint: str) -> Optional[int]:
+    """Per-peer loss seed derived from the peer's own endpoint.
+
+    A single base seed shared verbatim across peers would make them
+    drop in lockstep; XOR-ing in crc32(endpoint) gives each peer an
+    independent but reproducible stream. None base -> None (system
+    entropy), still independent per peer. crc32 is used, not hash(),
+    because hash() is salted per process and would not be reproducible.
+    """
+    if base is None:
+        return None
+    return (base ^ zlib.crc32(self_endpoint.encode("utf-8"))) & 0x7FFFFFFF
+
+
+def _make_default_mesh_factory(mesh_cfg: MeshConfig) -> MeshFactory:
+    """Default ZmqMesh factory that bakes in the config's channel model.
+
+    loss_prob/loss_seed live in the architecture YAML so the campaign
+    can sweep them without code changes. Default 0.0/None reproduces
+    the lossless mesh exactly. Each peer is seeded distinctly (see
+    _derive_peer_seed) so the loss is independent per link.
+    """
+    def factory(self_endpoint: str, peer_endpoints: list[str]) -> MeshBus:
+        return ZmqMesh(
+            self_endpoint=self_endpoint,
+            peer_endpoints=list(peer_endpoints),
+            loss_prob=mesh_cfg.loss_prob,
+            rng_seed=_derive_peer_seed(mesh_cfg.loss_seed, self_endpoint),
+        )
+
+    return factory
+
+
 def _noop_mesh_factory(*_args, **_kwargs) -> MeshBus:
     return NoOpMesh()
 
@@ -325,7 +359,7 @@ def build_fleet(
             log_dir=log_dir,
             px4_path=px4_path or Path.home() / "PX4-Autopilot",
             connection_factory=connection_factory,
-            mesh_factory=mesh_factory or _default_mesh_factory,
+            mesh_factory=mesh_factory or _make_default_mesh_factory(arch_cfg.mesh),
             process_runner=process_runner,
         )
     else:
