@@ -261,6 +261,10 @@ def run_trial(
         "--px4-pid-file", args.px4_pid_file,
     ]
 
+    if args.mesh_loss_prob is not None:
+        cmd += ["--mesh-loss-prob", str(args.mesh_loss_prob)]
+    if args.mesh_loss_seed is not None:
+        cmd += ["--mesh-loss-seed", str(args.mesh_loss_seed)]
     # Full simulator relaunch around every trial.
     cleanup()
     time.sleep(args.settle)
@@ -353,6 +357,17 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument(
         "--dry-run", action="store_true",
         help="print the plan + exact commands, execute nothing",
+    )
+    p.add_argument(
+        "--mesh-loss-prob", type=float, default=None,
+        help="pass through to run_one: mesh loss probability "
+             "[0.0-1.0] for every trial (loss sweep, architecture "
+             "C). Default: none (use architecture_c.yaml).",
+    )
+    p.add_argument(
+        "--mesh-loss-seed", type=int, default=None,
+        help="pass through to run_one: mesh loss RNG seed for "
+             "every trial. Default: none (use architecture_c.yaml).",
     )
     return p.parse_args(argv)
 
