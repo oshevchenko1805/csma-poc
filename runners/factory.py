@@ -292,6 +292,7 @@ def _make_default_mesh_factory(mesh_cfg: MeshConfig) -> MeshFactory:
             peer_endpoints=list(peer_endpoints),
             loss_prob=mesh_cfg.loss_prob,
             rng_seed=_derive_peer_seed(mesh_cfg.loss_seed, self_endpoint),
+            delay_sec=mesh_cfg.delay_sec,
         )
 
     return factory

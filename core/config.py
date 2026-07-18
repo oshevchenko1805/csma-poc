@@ -78,6 +78,7 @@ class MeshConfig:
     # rejects loss_prob>0 on a disabled (noop) mesh.
     loss_prob: float = 0.0
     loss_seed: Optional[int] = None
+    delay_sec: float = 0.0
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.loss_prob <= 1.0:
@@ -92,6 +93,10 @@ class MeshConfig:
             raise ConfigError(
                 f"mesh.loss_seed: must be an integer or null, got "
                 f"{self.loss_seed!r}"
+            )
+        if self.delay_sec < 0.0:
+            raise ConfigError(
+                f"mesh.delay_sec: must be >= 0.0, got {self.delay_sec}"
             )
 
 
@@ -257,7 +262,8 @@ def _parse_mesh(raw: dict[str, Any]) -> MeshConfig:
     _require_keys(raw, {"enabled", "transport"}, ctx)
     _no_extra_keys(
         raw,
-        {"enabled", "transport", "endpoints", "loss_prob", "loss_seed"},
+        {"enabled", "transport", "endpoints", "loss_prob", "loss_seed",
+         "delay_sec"},
         ctx,
     )
 
@@ -274,6 +280,7 @@ def _parse_mesh(raw: dict[str, Any]) -> MeshConfig:
     # checks it (an int, or null). Coercing here would turn a float or
     # bool into a silent seed.
     loss_seed = raw.get("loss_seed", None)
+    delay_sec = float(raw.get("delay_sec", 0.0))
 
     return MeshConfig(
         enabled=enabled,
@@ -281,6 +288,7 @@ def _parse_mesh(raw: dict[str, Any]) -> MeshConfig:
         endpoints=endpoints,
         loss_prob=loss_prob,
         loss_seed=loss_seed,
+        delay_sec=delay_sec,
     )
 
 
@@ -341,6 +349,12 @@ def _validate_architecture_invariants(cfg: ArchitectureConfig) -> None:
     if cfg.mesh.loss_prob > 0.0 and not cfg.mesh.enabled:
         raise ConfigError(
             "mesh.loss_prob>0 requires mesh.enabled=true — channel loss "
+            "only applies to the C mesh (A/B carry no mesh)"
+        )
+
+    if cfg.mesh.delay_sec > 0.0 and not cfg.mesh.enabled:
+        raise ConfigError(
+            "mesh.delay_sec>0 requires mesh.enabled=true — channel delay "
             "only applies to the C mesh (A/B carry no mesh)"
         )
 
