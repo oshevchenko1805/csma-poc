@@ -141,6 +141,12 @@ class RunResult:
     """True (Gazebo) vs believed (PX4 NED) position divergence per UAV,
     in metres. Diagnostic, not metric-grade — same scope rule as
     estimator_series (dies under monitor_takeout)."""
+    mesh_settings: Optional[dict[str, Any]] = None
+    """Configured mesh channel knobs for this run (item 4): enabled,
+    loss_prob, loss_seed, delay_sec. The x-axis of the loss sweep,
+    recorded per run so the curve never depends on folder naming. On
+    A/B (mesh disabled) loss_prob is 0.0 by construction.
+    """
     mesh_cost: Optional[dict[str, Any]] = None
     """Mesh message/byte counters folded across the fleet (item 3):
     per peer plus a fleet total, publish vs delivery, per topic. A/B
@@ -621,6 +627,12 @@ class ExperimentRunner:
         monitor_stats = [m.stats for m in self._fleet.monitors]
         coordinator_stats = [c.stats for c in self._fleet.coordinators]
 
+        mesh_settings = {
+            "enabled": self._arch_cfg.mesh.enabled,
+            "loss_prob": self._arch_cfg.mesh.loss_prob,
+            "loss_seed": self._arch_cfg.mesh.loss_seed,
+            "delay_sec": self._arch_cfg.mesh.delay_sec,
+        }
         result = RunResult(
             architecture=self._arch_cfg.architecture,
             run_id=self._run_id,
@@ -641,6 +653,7 @@ class ExperimentRunner:
             estimator_series=estimator_series,
             belief_divergence=belief_divergence,
             mesh_cost=mesh_cost,
+            mesh_settings=mesh_settings,
             error=error,
         )
 
