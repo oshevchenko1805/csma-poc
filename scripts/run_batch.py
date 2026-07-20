@@ -201,6 +201,7 @@ CLEANUP_CMD = (
     "./scripts/kill_px4.sh 2>/dev/null; "
     "pkill -9 -f gz 2>/dev/null; "
     "pkill -9 -f px4 2>/dev/null; "
+    "pkill -9 -f mavsdk_server 2>/dev/null; "
     "rm -f /tmp/px4_inst_*.log; "
     f"rm -f {PX4_ROOT}/build/px4_sitl_default/rootfs/"
     "{0,1,2}/parameters*.bson; "
