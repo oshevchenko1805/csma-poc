@@ -113,9 +113,10 @@ class Level:
     def __init__(self, loss: float):
         self.loss = loss
         self.n = 0
-        self.detected = 0
+        self.detected = 0          # >=1 cross_check AFTER attack onset
+        self.fp_preattack = 0      # >=1 cross_check BEFORE attack onset (FP)
         self.errors = 0
-        self.mttds: list[float] = []
+        self.mttds: list[float] = []   # first POST-attack cross_check offset
         self.realized: list[float] = []
 
 
@@ -139,12 +140,18 @@ def analyze(root: str, target_uav: str) -> list[Level]:
         if rl is not None:
             lvl.realized.append(rl)
         run_dir = os.path.dirname(sp)
+        t0 = _attack_onset(run_dir)
         hits = _cross_check_hits(run_dir, target_uav)
-        if hits:
+        if t0 is None:
+            continue  # cannot classify pre/post without attack onset
+        offsets = [h - t0 for h in hits]
+        post = [o for o in offsets if o >= 0.0]
+        pre = [o for o in offsets if o < 0.0]
+        if post:
             lvl.detected += 1
-            t0 = _attack_onset(run_dir)
-            if t0 is not None:
-                lvl.mttds.append(hits[0] - t0)
+            lvl.mttds.append(post[0])   # first cross_check after the attack
+        if pre:
+            lvl.fp_preattack += 1        # spurious cross_check before the attack
     return [levels[k] for k in sorted(levels)]
 
 
@@ -158,6 +165,20 @@ def _mean_sd(xs: list[float]) -> tuple[Optional[float], Optional[float]]:
     return (m, math.sqrt(var))
 
 
+def _median(xs: list[float]) -> Optional[float]:
+    if not xs:
+        return None
+    s = sorted(xs)
+    n = len(s)
+    mid = n // 2
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+
+# MTTD below this (seconds after attack onset) is too fast to be a real
+# multi-round mesh consensus — flagged as a likely spurious/early cross_check.
+EARLY_MTTD_S = 2.0
+
+
 def _fmt(x: Optional[float], nd: int = 3) -> str:
     return "-" if x is None else f"{x:.{nd}f}"
 
@@ -165,19 +186,36 @@ def _fmt(x: Optional[float], nd: int = 3) -> str:
 def print_table(levels: list[Level]) -> None:
     hdr = (
         f"{'loss':>5} {'n':>4} {'det':>4} {'rate':>6} "
-        f"{'95% CI (Wilson)':>18} {'realized':>9} {'MTTD mean±sd':>16} {'err':>4}"
+        f"{'95% CI (Wilson)':>18} {'realized':>9} {'fp_pre':>7} {'err':>4}"
     )
     print(hdr)
     print("-" * len(hdr))
     for lv in levels:
         p, lo, hi = wilson_ci(lv.detected, lv.n)
         rl_m, _ = _mean_sd(lv.realized)
-        mt_m, mt_sd = _mean_sd(lv.mttds)
         ci = f"[{_fmt(lo,2)}, {_fmt(hi,2)}]"
-        mttd = "-" if mt_m is None else f"{mt_m:.2f}±{mt_sd:.2f}s"
         print(
             f"{lv.loss:>5.2f} {lv.n:>4} {lv.detected:>4} {_fmt(p,3):>6} "
-            f"{ci:>18} {_fmt(rl_m,3):>9} {mttd:>16} {lv.errors:>4}"
+            f"{ci:>18} {_fmt(rl_m,3):>9} {lv.fp_preattack:>7} {lv.errors:>4}"
+        )
+
+    print("\nMTTD to first cross_check (detected trials only), robust stats:")
+    mh = (
+        f"{'loss':>5} {'ndet':>5} {'median':>8} {'min':>7} {'max':>8} "
+        f"{'mean±sd':>15} {'early<2s':>8}"
+    )
+    print(mh)
+    print("-" * len(mh))
+    for lv in levels:
+        md = _median(lv.mttds)
+        mn = min(lv.mttds) if lv.mttds else None
+        mx = max(lv.mttds) if lv.mttds else None
+        m, sd = _mean_sd(lv.mttds)
+        n_early = sum(1 for x in lv.mttds if x < EARLY_MTTD_S)
+        mean_sd = "-" if m is None else f"{m:.2f}±{sd:.2f}s"
+        print(
+            f"{lv.loss:>5.2f} {len(lv.mttds):>5} {_fmt(md,2):>8} "
+            f"{_fmt(mn,2):>7} {_fmt(mx,2):>8} {mean_sd:>15} {n_early:>8}"
         )
 
 
@@ -189,16 +227,24 @@ def write_csv(levels: list[Level], path: str) -> None:
         w.writerow(
             ["loss_prob", "n", "detected", "detection_rate",
              "ci_low", "ci_high", "realized_loss_mean",
-             "mttd_mean_s", "mttd_sd_s", "errors"]
+             "mttd_median_s", "mttd_min_s", "mttd_max_s",
+             "mttd_mean_s", "mttd_sd_s", "mttd_early_lt2s",
+             "fp_preattack", "errors"]
         )
         for lv in levels:
             p, lo, hi = wilson_ci(lv.detected, lv.n)
             rl_m, _ = _mean_sd(lv.realized)
             mt_m, mt_sd = _mean_sd(lv.mttds)
+            md = _median(lv.mttds)
+            mn = min(lv.mttds) if lv.mttds else None
+            mx = max(lv.mttds) if lv.mttds else None
+            n_early = sum(1 for x in lv.mttds if x < EARLY_MTTD_S)
             w.writerow([
                 lv.loss, lv.n, lv.detected, f"{p:.4f}",
-                f"{lo:.4f}", f"{hi:.4f}",
-                _fmt(rl_m, 4), _fmt(mt_m, 3), _fmt(mt_sd, 3), lv.errors,
+                f"{lo:.4f}", f"{hi:.4f}", _fmt(rl_m, 4),
+                _fmt(md, 3), _fmt(mn, 3), _fmt(mx, 3),
+                _fmt(mt_m, 3), _fmt(mt_sd, 3), n_early,
+                lv.fp_preattack, lv.errors,
             ])
     print(f"wrote {path}")
 
@@ -267,3 +313,4 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
