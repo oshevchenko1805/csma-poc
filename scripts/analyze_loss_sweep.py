@@ -112,9 +112,10 @@ def _realized_loss(summary: dict[str, Any]) -> Optional[float]:
 class Level:
     def __init__(self, loss: float):
         self.loss = loss
-        self.n = 0
+        self.n = 0                 # valid trials: no run error AND spoof landed
         self.detected = 0          # >=1 cross_check AFTER attack onset
         self.fp_preattack = 0      # >=1 cross_check BEFORE attack onset (FP)
+        self.no_attack = 0         # spoof did not take effect (divergence < gate)
         self.errors = 0
         self.mttds: list[float] = []   # first POST-attack cross_check offset
         self.realized: list[float] = []
@@ -133,9 +134,21 @@ def analyze(root: str, target_uav: str) -> list[Level]:
             continue  # cannot key a trial without provenance
         loss = round(float(loss), 4)
         lvl = levels.setdefault(loss, Level(loss))
-        lvl.n += 1
+        # A failed trial (e.g. TimeoutError — PX4 never flew) is not data:
+        # exclude it from n / detection / MTTD, count it separately. This
+        # also filters stale failed run dirs left on disk after a resume
+        # (run_batch retries into NEW dirs and does not delete the old ones).
         if s.get("error"):
             lvl.errors += 1
+            continue
+        # Validity gate: the GPS spoof must have actually taken effect.
+        # A trial where the target's believed position never diverged is
+        # "no attack", not "not detected" — exclude it from the rate.
+        peak = _target_spoof_peak_m(s, target_uav)
+        if peak is None or peak < SPOOF_MIN_DIVERGENCE_M:
+            lvl.no_attack += 1
+            continue
+        lvl.n += 1
         rl = _realized_loss(s)
         if rl is not None:
             lvl.realized.append(rl)
@@ -178,6 +191,22 @@ def _median(xs: list[float]) -> Optional[float]:
 # multi-round mesh consensus — flagged as a likely spurious/early cross_check.
 EARLY_MTTD_S = 2.0
 
+# A trial only counts if the GPS spoof actually took effect: uav_0's
+# believed-vs-true horizontal divergence must exceed this (metres). The
+# spoof targets a 50 m offset; a landed spoof peaks ~50 m, a no-op stays
+# ~1 m (sensor noise). Trials below this are "attack did not happen" — a
+# validity failure, NOT "not detected" — and are excluded from the
+# detection denominator (counted separately as no_attack). This gate is
+# what stops a flaky attack from masquerading as a detection result.
+SPOOF_MIN_DIVERGENCE_M = 10.0
+
+
+def _target_spoof_peak_m(summary: dict[str, Any], target_uav: str) -> Optional[float]:
+    """Peak believed-vs-true horizontal divergence of the target (metres)."""
+    bd = summary.get("belief_divergence") or {}
+    node = (bd.get("uavs") or {}).get(target_uav) or {}
+    return node.get("peak_horiz_m")
+
 
 def _fmt(x: Optional[float], nd: int = 3) -> str:
     return "-" if x is None else f"{x:.{nd}f}"
@@ -186,17 +215,18 @@ def _fmt(x: Optional[float], nd: int = 3) -> str:
 def print_table(levels: list[Level]) -> None:
     hdr = (
         f"{'loss':>5} {'n':>4} {'det':>4} {'rate':>6} "
-        f"{'95% CI (Wilson)':>18} {'realized':>9} {'fp_pre':>7} {'err':>4}"
+        f"{'95% CI (Wilson)':>18} {'realized':>9} {'no_atk':>7} {'fp_pre':>7} {'err':>4}"
     )
     print(hdr)
     print("-" * len(hdr))
+    print("(n = valid trials: run ok AND spoof landed; no_atk = spoof did not take effect, excluded)")
     for lv in levels:
         p, lo, hi = wilson_ci(lv.detected, lv.n)
         rl_m, _ = _mean_sd(lv.realized)
         ci = f"[{_fmt(lo,2)}, {_fmt(hi,2)}]"
         print(
             f"{lv.loss:>5.2f} {lv.n:>4} {lv.detected:>4} {_fmt(p,3):>6} "
-            f"{ci:>18} {_fmt(rl_m,3):>9} {lv.fp_preattack:>7} {lv.errors:>4}"
+            f"{ci:>18} {_fmt(rl_m,3):>9} {lv.no_attack:>7} {lv.fp_preattack:>7} {lv.errors:>4}"
         )
 
     print("\nMTTD to first cross_check (detected trials only), robust stats:")
@@ -229,7 +259,7 @@ def write_csv(levels: list[Level], path: str) -> None:
              "ci_low", "ci_high", "realized_loss_mean",
              "mttd_median_s", "mttd_min_s", "mttd_max_s",
              "mttd_mean_s", "mttd_sd_s", "mttd_early_lt2s",
-             "fp_preattack", "errors"]
+             "fp_preattack", "no_attack", "errors"]
         )
         for lv in levels:
             p, lo, hi = wilson_ci(lv.detected, lv.n)
@@ -244,7 +274,7 @@ def write_csv(levels: list[Level], path: str) -> None:
                 f"{lo:.4f}", f"{hi:.4f}", _fmt(rl_m, 4),
                 _fmt(md, 3), _fmt(mn, 3), _fmt(mx, 3),
                 _fmt(mt_m, 3), _fmt(mt_sd, 3), n_early,
-                lv.fp_preattack, lv.errors,
+                lv.fp_preattack, lv.no_attack, lv.errors,
             ])
     print(f"wrote {path}")
 
@@ -313,4 +343,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
