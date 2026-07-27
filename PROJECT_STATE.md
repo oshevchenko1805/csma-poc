@@ -1959,3 +1959,58 @@ unit-tested) — not re-flown.
 
 The "C detects" claim is now an engineering trade-off: detection costs
 ~205 msgs / 55 kB per 30 s of idle mesh, A/B pay nothing.
+
+## INSTRUMENTATION 4a CLOSED — mesh channel loss (Bernoulli erasure)
+
+Item 4a. Tests 674->710. Commits d4e1ba7 (loss+dropped in ZmqMesh),
+18c405f (config knobs), 6dc27d3 (factory wiring).
+
+ZmqMesh loss_prob: independent Bernoulli erasure per received frame, in
+_receive_loop, guarded so 0.0 is a strict no-op (RNG never sampled).
+Erased frames -> `dropped` tally (not `delivered`), never dispatched. Not
+the comm_disruption ATTACK (adversarial, iptables): this is ambient FANET
+channel quality, non-adversarial, layered under the attack. Erasure model
+only — no reorder/corruption. Config: mesh.loss_prob (0..1) + mesh.loss_seed
+in MeshConfig, invariant loss_prob>0 requires mesh.enabled (C-only).
+Factory derives a per-peer seed (base ^ crc32(endpoint)) so peers don't
+drop in lockstep; seed makes UNIT TESTS deterministic, NOT live runs
+(TCP timing is not deterministic) — reproducibility of a treatment comes
+from N repetitions at fixed loss_prob.
+
+Live verification: run_c_none_1784350542, arch C, baseline, loss_prob=0.3,
+error=None. published 207, delivered 288, dropped 126. delivered+dropped
+= 414 = 2*published EXACTLY (conservation across the 3-peer full mesh);
+realized_loss 0.304 ~ configured 0.30. This is the 0-loss baseline
+(run_c_none_1784294206: delivered=2*published, dropped=0) perturbed by
+exactly the configured rate. loss_prob=0.0 default leaves every existing
+run byte-identical.
+
+## INSTRUMENTATION 4b CLOSED — mesh channel delay (constant per-frame)
+
+Item 4b. Tests 710->724. Commits <4b1> (delay in ZmqMesh), <4b23>
+(config + factory).
+
+ZmqMesh delay_sec: constant per-frame deferral of DISPATCH, applied AFTER
+the arrival tally (the frame crossed the wire on time; only subscribers
+see it late). Single-thread design: the receiver enqueues delayed frames
+and drains matured ones each poll iteration (poll cadence tightened to
+20 ms when delay>0) — the poll loop never blocks, so throughput is
+preserved and there is no head-of-line collapse. FIFO holds without a heap
+(constant delay + arrival-order appends => monotonic due times). Default
+0.0 is a strict no-op: inline dispatch, no queue. Config mesh.delay_sec
+(>=0) with invariant delay>0 requires mesh.enabled (C-only); factory
+threads it into ZmqMesh. delivered/dropped counters are unaffected by
+design.
+
+PRE-REGISTERED expectation: delay is a LOW-IMPACT axis. Mesh latency of
+tens-to-hundreds of ms sits an order of magnitude below this PoC's
+dominant latencies — the ~1 Hz ESTIMATOR_STATUS detector floor (MTTD floor
+~2 s, R9) and the seconds-long PX4 restart (MTTR, R-notes). A flat delay
+sweep is therefore the expected and honest finding: the mesh is not the
+bottleneck. Loss (4a) carries the weight of the "non-ideal mesh" contribution.
+
+Live verification (smoke): run_c_none_1784352665, arch C, delay_sec=0.5,
+error=None, delivered=410=2*published(205), dropped=0 — delay reaches a
+real run, pipeline and teardown survive a non-empty delay queue, and the
+cost counters are unperturbed. The delay MECHANISM (deferral, FIFO,
+composition with loss) is proven by unit tests, not this run.

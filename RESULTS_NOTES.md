@@ -1,3 +1,4 @@
+
 # RESULTS_NOTES.md
 
 Working record of every empirical result, the mechanism behind it, its
@@ -627,3 +628,62 @@ Matched pair, arch C, gps_spoofing, target uav_0, SIM_GPS_OFF_N=50:
   validated runs_v1/runs_v3. Design them in a fresh chat.
 
 Do not launch the ~1160-run campaign until 3 and 4 are closed.
+
+
+## R9 — Loss sweep: mesh-mediated detection vs channel loss (headline statistic)
+
+**Scenario:** arch C × `detector_takeout+gps_spoofing`, target uav_0. Local
+detectors on the target are silenced (detector_takeout), so the GPS spoof
+is caught ONLY by a neighbour's `cross_check` over the mesh. Under mesh
+Bernoulli loss this becomes probabilistic → a detection-rate curve.
+
+**Design:** loss_prob ∈ {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6}, N=30 per level,
+NO fixed loss_seed (independent replicates — verified: two seed=None runs
+gave drop 302 vs 268). 210 trials via `run_batch.py`, one per level-root
+under `runs_sweep/dt_loss_*`. `err=0` on all 210 (no broken trials).
+Analyzer: `scripts/analyze_loss_sweep.py`, keys each trial by
+`run_summary.mesh_settings.loss_prob` (provenance in the data, not the
+folder name). "Detected" = ≥1 `cross_check` security event on uav_0
+**after** attack onset t0.
+
+| loss | n | det | rate | 95% CI (Wilson) | realized loss | fp_pre |
+|------|---|-----|------|-----------------|---------------|--------|
+| 0.00 | 30 | 30 | 1.000 | [0.89, 1.00] | 0.000 | 1 |
+| 0.10 | 30 | 28 | 0.933 | [0.79, 0.98] | 0.102 | 1 |
+| 0.20 | 30 | 23 | 0.767 | [0.59, 0.88] | 0.197 | 0 |
+| 0.30 | 30 | 21 | 0.700 | [0.52, 0.83] | 0.297 | 0 |
+| 0.40 | 30 | 17 | 0.567 | [0.39, 0.73] | 0.402 | 0 |
+| 0.50 | 30 | 8  | 0.267 | [0.14, 0.44] | 0.498 | 1 |
+| 0.60 | 30 | 0  | 0.000 | [0.00, 0.11] | 0.599 | 0 |
+
+**Reading:** mesh detection is resilient up to ~0.2 loss (>75%), degrades
+gracefully, collapses to 0/30 at 0.6. Deterministic anchors: 30/30 at
+loss 0, 0/30 at loss 0.6. Realized loss matches configured at every level
+(channel is valid). Figure: `runs_sweep/detection_vs_loss.png`; data:
+`runs_sweep/detection_vs_loss.csv`.
+
+**MTTD (first post-attack cross_check, detected trials only):** median
+≈ 8.0 s at every loss level (7.6–8.1 s) — consensus latency is
+loss-INDEPENDENT when consensus forms. Report the median, not the mean:
+under high loss consensus occasionally forms very late (max 33.4 s at
+loss 0.5), skewing the mean (10.98 ± 9.06 s) while the median holds at
+8.08 s.
+
+**cross_check false positives (NEW, for Ch.4):** 3 of 210 trials fired a
+`cross_check` on uav_0 **before** the attack (spurious, during normal
+formation flight) — a ~1.4% per-trial FP rate. Small but non-zero; the
+detector is a swappable component (Ch.4), so this characterises the PoC
+`cross_check` implementation, not the architecture.
+
+**Bug found & fixed during analysis:** the first analyzer took the
+earliest `cross_check` globally, so a pre-attack FP could (a) be
+mis-counted as a detection and (b) yield a negative MTTD. Gating on
+post-attack events changed exactly one data point (loss 0.5: 9→8) and
+removed all negative MTTDs — the headline curve is robust to the fix.
+
+**Scope / honesty:** single detector (`cross_check`), single spoof
+magnitude (SIM_GPS_OFF_N=50 m), PoC mesh over ZeroMQ (documented FANET
+approximation). loss is the load-bearing stochastic axis; delay was
+pre-declared low-effect. Baseline contrast (A/B × detector_takeout+gps →
+expected 0/N at any loss, no mesh backup) and knee refinement
+(0.45/0.55/0.65) are the next runs.

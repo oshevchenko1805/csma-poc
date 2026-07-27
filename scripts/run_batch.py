@@ -278,6 +278,11 @@ def run_trial(
             log_dir=str(log_dir), started_at=started,
         )
 
+    # Post-launch settle: let the simulator + mesh fully establish
+    # before the trial. Without it, high mesh loss (slow ZeroMQ
+    # establishment) leaves the GPS-spoof injection window unmet and
+    # the spoof silently fails to apply (belief_divergence ~1 m).
+    time.sleep(args.post_launch_settle)
     _log(f"RUN {cell.key} replicate {replicate} -> {run_id}")
     status = "ok"
     exit_code: Optional[int] = None
@@ -369,6 +374,13 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--mesh-loss-seed", type=int, default=None,
         help="pass through to run_one: mesh loss RNG seed for "
              "every trial. Default: none (use architecture_c.yaml).",
+    )
+    p.add_argument(
+        "--post-launch-settle", type=float, default=20.0,
+        help="seconds to wait AFTER launch before running the trial, "
+             "so the simulator and mesh fully establish (default: 20; "
+             "needed for reliable GPS-spoof injection under high mesh "
+             "loss)",
     )
     return p.parse_args(argv)
 
