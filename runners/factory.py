@@ -100,6 +100,7 @@ from enforcement.isolation import (
     LocalIsolationEnforcer,
     MeshAnnouncingIsolationEnforcer,
 )
+from enforcement.command_guard import CommandGuard
 from enforcement.recovery import RecoveryExecutor
 from runners.coordinator import Coordinator
 from runners.monitor import Monitor
@@ -165,6 +166,9 @@ class WiredFleet:
     # experiment layer can swap each one's MAVSDK runner for a
     # mission-backed one (borrows the live flight connection).
     loiter_handlers: list[ModeLoiterHandler] = field(default_factory=list)
+    # Command guards (all architectures). Started/stopped by the
+    # experiment runner; actuated only in C by FilterCommandsHandler.
+    guards: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +311,34 @@ def _noop_mesh_factory(*_args, **_kwargs) -> MeshBus:
 # ---------------------------------------------------------------------------
 
 
+GUARD_LISTEN_PORT_BASE: int = 14590
+"""Base UDP port the command guard listens on. The command-injection
+injector targets 14590 + (sysid - 1); the guard forwards accepted frames
+to the autopilot onboard port 14580 + (sysid - 1). Chosen clear of the
+PX4 SITL binds (14540/14570/14580/18570/...) observed on the VM."""
+
+GUARD_FORWARD_PORT_BASE: int = 14580
+"""PX4 SITL per-instance onboard MAVLink port; empirically accepts a
+COMMAND_LONG and returns COMMAND_ACK result=0 (verified on the VM)."""
+
+
+def _build_guards(endpoints_by_uav: dict) -> dict:
+    """One transparent CommandGuard per UAV, keyed by uav_id.
+
+    Deployed identically in all architectures — it is testbed
+    infrastructure on the injection ingress, not an architecture feature.
+    What differs per architecture is only whether a recovery pipeline
+    ever actuates its filtering (C does, via FilterCommandsHandler).
+    """
+    guards: dict = {}
+    for uav_id, ep in endpoints_by_uav.items():
+        guards[uav_id] = CommandGuard(
+            listen_port=GUARD_LISTEN_PORT_BASE + (ep.sysid - 1),
+            forward_port=GUARD_FORWARD_PORT_BASE + (ep.sysid - 1),
+        )
+    return guards
+
+
 def build_fleet(
     *,
     arch_cfg: ArchitectureConfig,
@@ -428,6 +460,7 @@ def _build_arch_ab(
         coordinators=[],
         meshes=[],
         log_dir=log_dir,
+        guards=list(_build_guards(endpoints_by_uav).values()),
     )
 
 
@@ -468,6 +501,7 @@ def _build_arch_c(
     meshes: list[MeshBus] = []
     filter_handlers: list[FilterCommandsHandler] = []
     loiter_handlers: list[ModeLoiterHandler] = []
+    guards = _build_guards(endpoints_by_uav)
 
     for spec in arch_cfg.monitors:
         # In Architecture C every monitor entry has location == its own
@@ -549,7 +583,9 @@ def _build_arch_c(
             endpoints={uav_id: _default_mavsdk_endpoint(sysid=ep.sysid)},
             runner=loiter_runner,
         )
-        filter_handler = FilterCommandsHandler()
+        filter_handler = FilterCommandsHandler(
+            uav_id=uav_id, guard=guards[uav_id]
+        )
         filter_handlers.append(filter_handler)
         loiter_handlers.append(loiter_handler)
 
@@ -598,4 +634,5 @@ def _build_arch_c(
         log_dir=log_dir,
         filter_handlers=filter_handlers,
         loiter_handlers=loiter_handlers,
+        guards=list(guards.values()),
     )

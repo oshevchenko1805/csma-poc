@@ -111,7 +111,9 @@ CONFIGS_DIR = REPO_ROOT / "configs"
 ATTACK_FACTORIES: dict[str, Callable[[], AttackInjector]] = {
     "none": NullAttackInjector,
     "comm_disruption": CommDisruptionInjector,
-    "command_injection": lambda: CommandInjectionInjector(port_base=14570),
+    "command_injection": lambda: CommandInjectionInjector(
+        port_base=14570, flight_port_base=14590
+    ),
     "gps_spoofing": lambda: GpsSpoofingInjector(
         param_name="SIM_GPS_OFF_N",
         spoofed_value=50.0,

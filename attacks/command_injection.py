@@ -174,6 +174,7 @@ class CommandInjectionInjector(AttackInjector):
         period_sec: float = DEFAULT_PERIOD_SEC,
         explicit_endpoint: Optional[str] = None,
         port_base: int = DEFAULT_PORT_BASE,
+        flight_port_base: Optional[int] = None,
         command_id: int = DEFAULT_COMMAND_ID,
         params: tuple[float, float, float, float, float, float, float] = DEFAULT_PARAMS,  # type: ignore[assignment]
     ) -> None:
@@ -195,10 +196,12 @@ class CommandInjectionInjector(AttackInjector):
         self._period = period_sec
         self._explicit_endpoint = explicit_endpoint
         self._port_base = port_base
+        self._flight_port_base = flight_port_base
         self._command_id = command_id
         self._params = tuple(params)
 
         self._target_endpoint: Optional[str] = None
+        self._flight_endpoint: Optional[str] = None
         self._target_sysid: Optional[int] = None
         self._armed: bool = False
         self._task: Optional[asyncio.Task] = None
@@ -229,6 +232,9 @@ class CommandInjectionInjector(AttackInjector):
         else:
             port = self._port_base + (ctx.target_sysid - 1)
             self._target_endpoint = f"udpout:127.0.0.1:{port}"
+        if self._flight_port_base is not None:
+            fport = self._flight_port_base + (ctx.target_sysid - 1)
+            self._flight_endpoint = f"udpout:127.0.0.1:{fport}"
         self._target_sysid = ctx.target_sysid
         self._armed = True
 
@@ -251,19 +257,23 @@ class CommandInjectionInjector(AttackInjector):
         assert self._target_sysid is not None
         try:
             while not self._stop_event.is_set():
-                try:
-                    await self._sender.send_command_long(
-                        target_endpoint=self._target_endpoint,
-                        source_sysid=self._attacker_sysid,
-                        target_sysid=self._target_sysid,
-                        command_id=self._command_id,
-                        params=self._params,
-                    )
-                    self._n_sent += 1
-                except Exception:
-                    # Transient send failures must not kill the loop;
-                    # the experiment runner relies on continuous pressure.
-                    pass
+                endpoints = [self._target_endpoint]
+                if self._flight_endpoint is not None:
+                    endpoints.append(self._flight_endpoint)
+                for endpoint in endpoints:
+                    try:
+                        await self._sender.send_command_long(
+                            target_endpoint=endpoint,
+                            source_sysid=self._attacker_sysid,
+                            target_sysid=self._target_sysid,
+                            command_id=self._command_id,
+                            params=self._params,
+                        )
+                        self._n_sent += 1
+                    except Exception:
+                        # Transient send failures must not kill the loop;
+                        # the experiment runner relies on continuous pressure.
+                        pass
 
                 # Sleep interruptibly: wake immediately on stop signal.
                 try:

@@ -312,6 +312,10 @@ class ExperimentRunner:
             mon.start()
         for coord in self._fleet.coordinators:
             coord.start()
+        # Command guards sit on the injection ingress; bring them up
+        # before the mission so the relay is live when the attack fires.
+        for guard in self._fleet.guards:
+            guard.start()
 
         # Swap each loiter handler's MAVSDK runner for one backed by the
         # live mission connection. During flight the mission owns the only
@@ -337,6 +341,17 @@ class ExperimentRunner:
                             uav_id, main_loop=main_loop
                         )
                     )
+            # Give each C filter handler a mission-resume runner so
+            # command-injection recovery can undo a mode hijack, not only
+            # block further attacker frames.
+            if hasattr(self._mission_runner, "resume_runner_for"):
+                for handler in self._fleet.filter_handlers:
+                    if handler.target_uav is not None:
+                        handler.set_resume_runner(
+                            self._mission_runner.resume_runner_for(
+                                handler.target_uav, main_loop=main_loop
+                            )
+                        )
 
         self._start_wall = time.time()
 
@@ -445,6 +460,11 @@ class ExperimentRunner:
         for mesh in self._fleet.meshes:
             try:
                 mesh.stop()
+            except Exception:
+                pass
+        for guard in self._fleet.guards:
+            try:
+                guard.stop()
             except Exception:
                 pass
         # Stopped last: keeps recording through mission abort/RTL. This

@@ -460,6 +460,51 @@ class MissionLoiterRunner(MavsdkRunner):
         )
 
 
+class MissionResumeRunner:
+    """Re-engage MISSION mode on a UAV via its live mission controller.
+
+    Recovery action for command injection. After the guard blocks the
+    attacker's further frames, this undoes a command that already landed
+    (a DO_REPOSITION / mode change) by re-commanding the mission, so the
+    target returns to its route instead of loitering at the injected
+    point. Same cross-loop bridge as MissionLoiterRunner: the MAVSDK
+    System lives on the main loop, recovery runs on the mesh-receiver
+    thread, so start_mission() is scheduled back onto the main loop with
+    run_coroutine_threadsafe.
+    """
+
+    DEFAULT_BRIDGE_TIMEOUT_SEC: float = 10.0
+
+    def __init__(
+        self,
+        runner: "MavsdkMissionRunner",
+        uav_id: str,
+        *,
+        main_loop=None,
+        bridge_timeout_sec: float = DEFAULT_BRIDGE_TIMEOUT_SEC,
+    ) -> None:
+        self._runner = runner
+        self._uav_id = uav_id
+        self._main_loop = main_loop
+        self._bridge_timeout = bridge_timeout_sec
+
+    async def resume(self) -> None:
+        controller = self._runner.controller_for(self._uav_id)
+        try:
+            current = asyncio.get_running_loop()
+        except RuntimeError:
+            current = None
+        if self._main_loop is None or current is self._main_loop:
+            await controller.start_mission()
+            return
+        future = asyncio.run_coroutine_threadsafe(
+            controller.start_mission(), self._main_loop
+        )
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: future.result(timeout=self._bridge_timeout)
+        )
+
+
 class MavsdkMissionRunner(MissionRunner):
     """Drive N UAVs through a coordinated NED waypoint sequence."""
 
@@ -549,6 +594,15 @@ class MavsdkMissionRunner(MissionRunner):
         contract as param_writer_for.
         """
         return MissionLoiterRunner(self, uav_id, main_loop=main_loop)
+
+    def resume_runner_for(self, uav_id: str, *, main_loop=None) -> "MissionResumeRunner":
+        """Lend this UAV's live connection as a mission-resume runner.
+
+        Recovery action for command injection: re-engages MISSION mode so
+        a landed reposition/mode hijack is undone. Same lazy-resolve +
+        cross-loop bridge contract as loiter_runner_for.
+        """
+        return MissionResumeRunner(self, uav_id, main_loop=main_loop)
 
     async def start(self) -> None:
         """Connect all, takeoff, upload, start — fully in parallel."""
