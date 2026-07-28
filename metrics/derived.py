@@ -236,6 +236,13 @@ class DerivedMetrics:
     coordination_restored: Optional[float]
     total_response_time_s: Optional[float]
     baseline_track_error_m: Optional[float]
+    detected: Optional[bool]
+    """Whether a SecurityEvent fired for the target on this (attack) run.
+    Detection rate = mean over valid attack runs; FN rate = 1 - that."""
+    isolation_success: Optional[bool]
+    """Whether the incident stayed confined to the target — no non-target
+    UAV left the mission plan after the attack (thesis 3.13: contained
+    without uncontrolled spread)."""
 
 
 def analyse_run(run_dir: str) -> Optional[DerivedMetrics]:
@@ -333,6 +340,26 @@ def analyse_run(run_dir: str) -> Optional[DerivedMetrics]:
                 coord_restored = shares[-1]
                 residual = shares[-1]
 
+    # detection (for FN rate) and isolation success — attack runs only
+    detected = None
+    isolation_success = None
+    if is_attack_run and t_attack is not None:
+        detected = _first_ts(events, "security") is not None
+        # Isolation succeeded if no NON-target UAV ever left the plan
+        # after the attack: the incident stayed confined to the target.
+        spread = False
+        for uav, series in dev.items():
+            if uav == target:
+                continue
+            post = [d for (t, d) in series if t >= t_attack]
+            if post and max(post) > ON_PLAN_TOLERANCE_M:
+                spread = True
+                break
+        # Only meaningful when we actually observed the other UAVs.
+        others = [u for u in dev if u != target]
+        if others:
+            isolation_success = not spread
+
     return DerivedMetrics(
         run_id=summary.get("run_id") or os.path.basename(run_dir),
         architecture=str(summary.get("architecture") or "?"),
@@ -348,6 +375,8 @@ def analyse_run(run_dir: str) -> Optional[DerivedMetrics]:
         coordination_restored=coord_restored,
         total_response_time_s=trt,
         baseline_track_error_m=baseline,
+        detected=detected,
+        isolation_success=isolation_success,
     )
 
 
@@ -375,10 +404,22 @@ def _fmt_rate(values: list) -> str:
     return "%d/%d (%d%%)" % (k, len(vals), round(100 * k / len(vals)))
 
 
+def _fmt_fn_rate(values: list) -> str:
+    """False-negative rate = share of valid attack runs NOT detected."""
+    vals = [v for v in values if isinstance(v, bool)]
+    if not vals:
+        return "—"
+    fn = sum(1 for v in vals if not v)
+    return "%d/%d (%d%%)" % (fn, len(vals), round(100 * fn / len(vals)))
+
+
 FIELDS = [
+    ("detected", "Detection rate (valid attacks)", _fmt_rate),
+    ("detected", "False-negative rate", _fmt_fn_rate),
+    ("isolation_success", "Isolation success rate", _fmt_rate),
     ("time_to_isolation_s", "Time to isolation, s", _fmt),
     ("mttr_functional_s", "MTTR functional, s", _fmt),
-    ("degradation_stopped", "Degradation stopped", _fmt_rate),
+    ("degradation_stopped", "Recovery success rate", _fmt_rate),
     ("stabilisation_level_m", "Stabilisation level, m", _fmt),
     ("mission_degradation_m", "Mission degradation, m", _fmt),
     ("residual_mission_func", "Residual mission function", _fmt),
