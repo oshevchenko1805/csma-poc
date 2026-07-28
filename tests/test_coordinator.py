@@ -51,7 +51,7 @@ class _AlwaysOkHandler(ActionHandler):
         return True, None
 
 
-def _isolation(target_uav: str = "uav_2", reason: str = "heartbeat_loss") -> IsolationAnnounce:
+def _isolation(target_uav: str = "uav_2", reason: str = "gps_anomaly") -> IsolationAnnounce:
     return IsolationAnnounce(
         source="monitor_uav_0",
         target_uav=target_uav,
@@ -295,14 +295,14 @@ class TestIsolationAwareElection:
 class TestIsolationToRecoveryRequest:
     def test_coordinator_emits_recovery_request(self):
         c, mesh, *_ = _build_coord(our_sysid=1, target_uav="uav_0")
-        ann = _isolation(target_uav="uav_2", reason="heartbeat_loss")
+        ann = _isolation(target_uav="uav_2", reason="gps_anomaly")
         mesh.deliver("isolation", ann)
 
         # Should have published a RecoveryRequest
         reqs = [e for e in mesh.published if isinstance(e, RecoveryRequest)]
         assert len(reqs) == 1
         assert reqs[0].target_uav == "uav_2"
-        assert reqs[0].action == RecoveryAction.RESTART_PROCESS
+        assert reqs[0].action == RecoveryAction.MODE_LOITER
         assert reqs[0].caused_by == ann.event_id
         assert c.stats["recovery_requests_issued"] == 1
 
@@ -512,7 +512,7 @@ class TestTwoCoordinatorIntegration:
             # Use mesh_1 to publish (as if coming from monitor_uav_1).
             ann = IsolationAnnounce(
                 source="monitor_uav_1", target_uav="uav_1",
-                reason="heartbeat_loss", decided_by="monitor_uav_1",
+                reason="gps_anomaly", decided_by="monitor_uav_1",
             )
             mesh_1.publish(ann)
 

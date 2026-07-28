@@ -18,7 +18,7 @@ Reason -> action mapping
 ------------------------
 Each IsolationAnnounce.reason maps to one canonical recovery action:
 
-    heartbeat_loss        restart_process
+    heartbeat_loss        (none - see REASON_TO_ACTION)
     command_injection     filter_commands
     gps_anomaly           mode_loiter
     cross_check_anomaly   mode_loiter
@@ -49,10 +49,30 @@ class RecoveryAction:
 
 
 REASON_TO_ACTION: dict[str, str] = {
-    "heartbeat_loss": RecoveryAction.RESTART_PROCESS,
+    # heartbeat_loss deliberately maps to NO action.
+    #
+    # Measured in pass 1 (N=5, architecture C): answering heartbeat loss
+    # with restart_process cost 36.65 +- 11.73 m of mission deviation and
+    # dropped residual mission function to 0.73, while A and B, which take
+    # no recovery action at all, stayed on plan (1.95 m / 0.74 m, residual
+    # 1.00). Loss of heartbeat means the node is unreachable, not
+    # compromised; a destructive automated response is not warranted on
+    # that signal alone. Detection, isolation and the mesh announcement
+    # still happen — only the destructive action is withheld.
+    #
+    # The superseded mapping is kept in COARSE_POLICY_REASON_TO_ACTION
+    # below for the policy comparison in Chapter 4.
     "command_injection": RecoveryAction.FILTER_COMMANDS,
     "gps_anomaly": RecoveryAction.MODE_LOITER,
     "cross_check_anomaly": RecoveryAction.MODE_LOITER,
+}
+
+
+# Superseded policy, retained for the Chapter 4 comparison of a coarse
+# (destructive) recovery policy against a proportionate one. Not used by
+# RecoveryDecider; restore by merging it into REASON_TO_ACTION.
+COARSE_POLICY_REASON_TO_ACTION: dict[str, str] = {
+    "heartbeat_loss": RecoveryAction.RESTART_PROCESS,
 }
 
 

