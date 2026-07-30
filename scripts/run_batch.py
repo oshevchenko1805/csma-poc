@@ -211,6 +211,27 @@ CLEANUP_CMD = (
 LAUNCH_CMD = "./scripts/launch_px4.sh && ./scripts/launch_router.sh"
 
 
+MAX_CONSEC_FAIL: int = 4
+"""Abort the batch after this many consecutive failed trials — the
+environment is wedged and further trials would only grind the per-trial
+timeout for hours (the 16h-campaign failure mode)."""
+
+
+def _sim_procs_alive() -> int:
+    """Count lingering PX4 / Gazebo / mavsdk_server processes."""
+    total = 0
+    for pat in ("mavsdk_server", "px4", "gz"):
+        try:
+            r = subprocess.run(
+                ["pgrep", "-f", pat],
+                capture_output=True, text=True, timeout=8,
+            )
+            total += len([x for x in r.stdout.split() if x.strip()])
+        except Exception:
+            pass
+    return total
+
+
 def cleanup(verbose: bool = True) -> None:
     if verbose:
         _log("cleanup: kill router/px4/gz, rm params + stale logs")
@@ -218,6 +239,19 @@ def cleanup(verbose: bool = True) -> None:
         _bash(CLEANUP_CMD, timeout=60)
     except subprocess.TimeoutExpired:
         _log("warn: cleanup timed out")
+    # Verified teardown: pkill returns immediately but processes can take
+    # a few seconds to actually exit. Launching a fresh sim on top of a
+    # half-dead one is how the campaign wedged. Poll until they are gone.
+    for _ in range(8):
+        if _sim_procs_alive() == 0:
+            return
+        time.sleep(1.5)
+        try:
+            _bash(CLEANUP_CMD, timeout=60)
+        except subprocess.TimeoutExpired:
+            pass
+    if _sim_procs_alive() > 0:
+        _log("warn: sim processes still alive after verified teardown")
 
 
 def launch() -> bool:
@@ -436,6 +470,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         _log(f"resume: {len(completed)} trials already ok, will skip them")
 
     results: list[TrialRecord] = []
+    consec_fail = 0
     for idx, (cell, rep) in enumerate(trials, 1):
         if (cell.key, rep) in completed:
             _log(f"[{idx}/{total}] skip {cell.key} r{rep} (already ok)")
@@ -460,6 +495,20 @@ def main(argv: Optional[list[str]] = None) -> int:
             f"[{idx}/{total}] {cell.key} r{rep} -> {rec.status} "
             f"(exit {rec.exit_code}) in {rec.duration_sec:.0f}s"
         )
+        if rec.status == "ok":
+            consec_fail = 0
+        else:
+            consec_fail += 1
+            if consec_fail >= MAX_CONSEC_FAIL:
+                _log(
+                    f"CIRCUIT BREAKER: {consec_fail} consecutive failed "
+                    f"trials — environment wedged, aborting batch. "
+                    f"Fix the sim (reboot VM / let it cool), then re-run: "
+                    f"resumability skips the trials that already passed."
+                )
+                cleanup()
+                _summarize(results)
+                return 3
 
     cleanup()
     _summarize(results)
