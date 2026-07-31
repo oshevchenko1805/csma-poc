@@ -89,8 +89,11 @@ def mttd(run_dir: str) -> Optional[float]:
     t0 = _attack_ts(events)
     if t0 is None:
         return None
+    # First security event AT OR AFTER the injection instant. Taking the
+    # first overall would catch a pre-attack false positive (cross_check
+    # background) and yield a nonsensical negative MTTD.
     for e in events:
-        if e.get("event_type") == "security":
+        if e.get("event_type") == "security" and float(e["timestamp"]) >= t0:
             return float(e["timestamp"]) - t0
     return None
 
@@ -98,7 +101,9 @@ def mttd(run_dir: str) -> Optional[float]:
 def collect(roots: list) -> dict:
     """(arch, attack) -> list of per-run records over VALID trials."""
     cells = defaultdict(list)
-    counts = defaultdict(lambda: {"valid": 0, "no_atk": 0, "no_summary": 0})
+    counts = defaultdict(
+        lambda: {"valid": 0, "no_atk": 0, "no_summary": 0, "errored": 0}
+    )
     for root in roots:
         for run_dir in sorted(glob.glob(os.path.join(root, "run_*"))):
             spath = os.path.join(run_dir, "run_summary.json")
@@ -110,17 +115,43 @@ def collect(roots: list) -> dict:
             attack = str(summary.get("attack_name") or "?")
             key = (arch, attack)
 
-            # Belief gate — GPS family only.
-            if is_gps_family(attack):
-                peak = belief_peak(summary)
-                if peak is None or peak <= BELIEF_GATE_M:
-                    counts[key]["no_atk"] += 1
-                    continue
+            # Skip runs that errored (TimeoutError etc): they never flew,
+            # so counting them as non-detections fabricates false negatives.
+            if summary.get("error"):
+                counts[key]["errored"] += 1
+                continue
 
             m = D.analyse_run(run_dir)
             if m is None:
                 counts[key]["no_summary"] += 1
                 continue
+
+            # Validity gate — GPS family only. A spoof counts as landed if
+            # the believed position diverged from truth (peak > gate). When
+            # belief is UNMEASURABLE — monitor_takeout kills the monitors
+            # whose telemetry belief_divergence needs — fall back to the
+            # Gazebo trajectory: a real physical deviation from the plan
+            # means the spoof drove the vehicle, i.e. it landed. Without
+            # this fallback the whole A/monitor_takeout cell (the SPOF
+            # collapse) is wrongly discarded as "no attack".
+            if is_gps_family(attack):
+                peak = belief_peak(summary)
+                dev = m.mission_degradation_m
+                # belief_divergence is UNRELIABLE under monitor_takeout:
+                # the attack kills the monitors whose telemetry belief
+                # needs, so it reads ~1 m even when the vehicle is
+                # physically hijacked 50 m (measured: A/monitor_takeout
+                # peak=1.0 while trajectory deviation=49.9). For that
+                # scenario validate on the Gazebo trajectory — ground
+                # truth outside the system under test. Everywhere else,
+                # belief is the specific spoof-landed signal.
+                belief_unreliable = "monitor_takeout" in attack
+                landed = (peak is not None and peak > BELIEF_GATE_M) or (
+                    belief_unreliable and dev is not None and dev > BELIEF_GATE_M
+                )
+                if not landed:
+                    counts[key]["no_atk"] += 1
+                    continue
             counts[key]["valid"] += 1
             cells[key].append((m, mttd(run_dir)))
     return {"cells": cells, "counts": counts}
