@@ -190,22 +190,14 @@ def fp_background(roots: list) -> dict:
         t0 = _attack_ts(events)
         t_start = _telemetry_start(run_dir)
 
-        # A baseline run carries an `attack` marker at the nominal instant
-        # even though nothing is injected. Treating that marker as the end
-        # of the clean window discards most of the run — and with it any
-        # false positive that fired in the second half. On a baseline run
-        # the whole flight is clean operation.
-        is_baseline = str(summary.get("attack_name") or "none").lower() in ("", "none")
-        boundary = None if is_baseline else t0
-
-        if boundary is not None and t_start is not None and boundary > t_start:
-            rec["exposure_s"] += boundary - t_start
-        elif boundary is None:
+        if t0 is not None and t_start is not None and t0 > t_start:
+            rec["exposure_s"] += t0 - t_start
+        elif t0 is None:
             rec["exposure_s"] += float(summary.get("duration_sec") or 0.0)
 
         pre = [e for e in events
                if e.get("event_type") == "security"
-               and (boundary is None or float(e["timestamp"]) < boundary)]
+               and (t0 is None or float(e["timestamp"]) < t0)]
         if pre:
             rec["fp_runs"] += 1
             rec["bursts"].append(len(pre))
