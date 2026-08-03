@@ -54,3 +54,6 @@ test_gps_offset_inflight*.py
 *.bson
 runs*/
 pilot_archive/
+
+# patch backups
+*.bak
