@@ -630,7 +630,11 @@ Matched pair, arch C, gps_spoofing, target uav_0, SIM_GPS_OFF_N=50:
 Do not launch the ~1160-run campaign until 3 and 4 are closed.
 
 
-## R9 — Loss sweep: mesh-mediated detection vs channel loss (headline statistic)
+## R10 — Loss sweep: mesh-mediated detection vs channel loss (headline statistic)
+
+*(Numbered R10 throughout the rest of this file and in the handoffs. It
+was originally written as a second "R9" by mistake; R9 is the MTTD
+decomposition above.)*
 
 **Scenario:** arch C × `detector_takeout+gps_spoofing`, target uav_0. Local
 detectors on the target are silenced (detector_takeout), so the GPS spoof
@@ -759,9 +763,9 @@ Phase divergence excess, m:
 |---|---|---|---|
 | detector_takeout+gps | 14.1 | 12.4 | **172.9 [169.0-176.8]** |
 | monitor_takeout+gps | 14.3 | 14.1 | 144.0 |
-| gps_spoofing | 15.3 | 16.3 | 139.5 |
+| gps_spoofing | 14.1 | 15.4 | 145.5 |
 | command_injection | 154.1 | 151.9 | **0.2 [0.0-0.4]** |
-| comm_disruption | 104.0 | 114.0 | 124.4 |
+| comm_disruption | 106.5 | 110.6 | 117.1 |
 
 Geometry deviation excess, m:
 
@@ -769,9 +773,15 @@ Geometry deviation excess, m:
 |---|---|---|---|
 | detector_takeout+gps | 74.7 | 74.2 | **33.1** |
 | monitor_takeout+gps | 74.1 | 74.5 | 52.7 |
-| gps_spoofing | 74.0 | 70.1 | 52.9 |
+| gps_spoofing | 67.8 | 71.4 | 52.9 |
 | command_injection | 57.0 | 59.2 | **0.1** |
-| comm_disruption | 31.0 | 37.0 | 36.3 |
+| comm_disruption | 36.2 | 36.9 | 36.3 |
+
+*(All cells above re-verified against `runs_campaign/campaign_master.csv`
+at commit `918ee64` — `valid == True`, median per architecture × attack.
+The `gps_spoofing` and `comm_disruption` rows were stale in the original
+write-up and have been corrected to the master file. Every other cell
+matched.)*
 
 ### Two readings that must go in the text
 
@@ -810,7 +820,7 @@ positive that triggered an isolation). So:
 |---|---|---|---|---|
 | A | 0 | 0 | 0 | 0 |
 | B | 0 | 0 | 0 | 0 |
-| C | 451 ± 26 | 117-122 | 902 ± 52 | 0.75 |
+| C | 457 ± 23 | 117-122 | 902 ± 52 | 0.75 |
 
 A and B are **exactly** zero by construction (`NoOpMesh`), so the
 overhead is a measurement, not an estimate.
@@ -831,7 +841,7 @@ run plus whole baseline runs (~190 min per architecture).
 
 | arch | runs with FP | events | by detector | events per FP-run |
 |---|---|---|---|---|
-| A | 6/137 (4.4%) | 13 | heartbeat 11, gps 2 | 3, 3, 2, 1, 1, 1 |
+| A | 6/136 (4.4%) | 13 | heartbeat 11, gps 2 | 3, 3, 2, 1, 1, 1 |
 | B | 9/140 (6.4%) | 15 | gps 9, heartbeat 6 | 3, 2, 1, 1, 1, 1, 1, 1, 1 |
 | C | 2/138 (1.4%) | 13 | cross_check 10, gps 3 | **8, 5** |
 
@@ -1027,7 +1037,33 @@ detector sometimes fails".
    `campaign_master.csv` via `metrics/plots.py`.
 3. Limitations stay limitations, not tasks: simulation-only, 3 vehicles,
    and **no Byzantine case** — the adversary never makes a compromised
-   node inject false context into the mesh, while `cross_check` assumes
-   honest neighbours. That is the first thing a reviewer will probe and
-   the strongest single item for future work; the labelled dataset from
-   435 instrumented runs is already in place for it.
+   node inject false context into the mesh.
+
+   State the gap precisely; the loose version below was wrong and was
+   retracted after reading `detectors/cross_check.py`.
+
+   **Wrong:** "`cross_check` assumes honest neighbours."
+   **Right:** `CrossCheckDetector` is a kinematic feasibility check. It
+   takes a peer's announcement, computes the haversine distance from that
+   peer's own previous announcement, divides by Δt and compares against
+   `max_velocity_mps` (25 m/s, cruise ~12) plus `position_error_margin_m`
+   (10 m). A neighbour's claim is therefore checked against a constraint
+   the claimant does not control — physics — not accepted on trust. The
+   3.2.4 requirement ("не безумовна достовірність будь-якого окремого
+   вузла") is substantively met by the implementation.
+
+   **The residual gap, and it is narrow:**
+   (a) a Byzantine node that lies *plausibly* — fabricating a smooth,
+   physically feasible false track — passes the check. But the check is
+   per-peer self-consistency, so such a node can only misrepresent
+   itself: the event targets `ann.uav_id`, which is the announcer.
+   (b) framing a *healthy* peer is possible because `uav_id` is carried
+   in the payload and `core/mesh.py` (ZeroMQ PUB/SUB, topic + payload)
+   does not bind it to the sending socket. That is transport
+   authentication, not security-architecture design — say so.
+
+   Byzantine resilience in UAV swarms is an established line with its own
+   solutions (BFT consensus, reputation, blockchain sharding, DAG). Frame
+   this as a declared scope boundary with references, not as an apology.
+   The labelled dataset from 435 instrumented runs is already in place for
+   it.
