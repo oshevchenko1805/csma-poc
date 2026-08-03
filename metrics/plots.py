@@ -9,26 +9,40 @@ Print discipline: greyscale fills plus hatching, so the figures survive
 black-and-white printing; each figure is written as PNG (300 dpi, for
 drafts) and PDF (vector, for the bound copy).
 
-Figures
--------
+Figures — the published set is exactly seven
+--------------------------------------------
 fig1_detection      detection rate with Wilson 95% CI, per attack
 fig2_degradation    mission degradation, median + IQR
-fig3_coordination   coordination integrity: phase and geometry
-fig4_tradeoff       per-run scatter, phase vs geometry, ONE PANEL PER
-                    SCENARIO — pooling them hides the effect, because the
-                    clusters of different attacks land on top of one
-                    another
+fig3_coordination   coordination integrity: phase and geometry. Carries
+                    an on-canvas note, because in three of five cells C
+                    sits ABOVE the baselines and a reader left to the
+                    caption alone will read that as a defeat rather than
+                    as the R11 trade-off
+fig4_recovery       time until the off-plan deviation stops growing, plus
+                    recovery success rate as k/n (in `plots_extra`)
 fig5_falsepositive  clean-mode false positives by detector (exact counts
                     from the master file, never a total split across a
                     name list), and how far one false alarm spreads
 fig6_sustain        detection and false positives vs the sustain rule k.
                     FP uses the FLEET maximum: a false alarm on a healthy
                     swarm need not occur on the attack target.
-fig7_meshcost       the architecture's own overhead, per run
+fig7_losssweep      mesh-mediated detection vs channel loss (in
+                    `plots_extra`)
+
+`fig_tradeoff` and `fig_mesh_cost` below are NO LONGER PUBLISHED and are
+not called by `main()`. The scatter restated fig3 with more ink and no
+extra conclusion; the mesh-cost bar chart was two zero bars and one bar,
+which is a table row, not a figure. The code is kept because both are
+correct and cheap to revive, not because the figures earned their place.
+A figure that carries no conclusion does not merely waste a page, it
+invites the reader to infer one that is not there.
 
 Usage
 -----
     python -m metrics.plots runs_campaign/campaign_master.csv --outdir figures
+
+Produces all seven; `plots_extra` is driven from here so the numbering
+stays sequential and one command rebuilds the whole set.
 """
 
 from __future__ import annotations
@@ -223,6 +237,18 @@ def fig_coordination(rows: list, outdir: str) -> None:
     _grouped_bars(axes[1], rows_v, attacks, "geometry_excess_m")
     axes[0].set_ylabel("Фазове розходження, м")
     axes[1].set_ylabel("Зміна міжвузлової\nгеометрії, м")
+    # The panel shows C ABOVE the baselines in three cells. That is the
+    # R11 trade-off, not a defeat, and a reader must not be left to
+    # infer it from the caption alone.
+    axes[0].set_ylim(0, 275)
+    axes[0].annotate(
+        "C виявляє атаку і зупиняє борт: стримування купується фазовим відставанням.\n"
+        "A і B атаки не бачать і летять за спотвореними координатами, "
+        "формально лишаючись на плані.",
+        xy=(0.5, 0.97), xycoords="axes fraction", fontsize=7.5,
+        ha="center", va="top", color="0.2",
+        bbox=dict(boxstyle="round,pad=0.35", facecolor="white",
+                  edgecolor="0.6", linewidth=0.6, alpha=0.92))
     _legend_above(axes[0])
     _category_axis(axes[1], attacks)
     save(fig, outdir, "fig3_coordination")
@@ -398,18 +424,24 @@ def main() -> None:
     ap.add_argument("master_csv", nargs="?",
                     default="runs_campaign/campaign_master.csv")
     ap.add_argument("--outdir", default="figures")
+    ap.add_argument("--loss-csv", dest="loss_csv",
+                    default="runs_final/detection_vs_loss.csv")
     args = ap.parse_args()
 
     rows = load(args.master_csv)
     print("read %d runs from %s" % (len(rows), args.master_csv))
     print("writing to %s/" % args.outdir)
-    fig_detection(rows, args.outdir)
-    fig_degradation(rows, args.outdir)
-    fig_coordination(rows, args.outdir)
-    fig_tradeoff(rows, args.outdir)
-    fig_false_positives(rows, args.outdir)
-    fig_sustain(rows, args.outdir)
-    fig_mesh_cost(rows, args.outdir)
+    # Imported here, not at module level: plots_extra imports helpers
+    # from this module, so a top-level import would be circular.
+    from metrics.plots_extra import fig_recovery, fig_loss_sweep
+
+    fig_detection(rows, args.outdir)          # fig1
+    fig_degradation(rows, args.outdir)        # fig2
+    fig_coordination(rows, args.outdir)       # fig3
+    fig_recovery(rows, args.outdir)           # fig4
+    fig_false_positives(rows, args.outdir)    # fig5
+    fig_sustain(rows, args.outdir)            # fig6
+    fig_loss_sweep(args.loss_csv, args.outdir)  # fig7
     print("done")
 
 
