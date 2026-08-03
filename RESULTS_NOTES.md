@@ -687,3 +687,347 @@ approximation). loss is the load-bearing stochastic axis; delay was
 pre-declared low-effect. Baseline contrast (A/B × detector_takeout+gps →
 expected 0/N at any loss, no mesh backup) and knee refinement
 (0.45/0.55/0.65) are the next runs.
+---
+
+# ANALYSIS PHASE — results R11-R16
+
+Written after the campaign closed. **No new simulation was needed for
+R11-R14**: every number below came out of data already on disk. R15
+records the 150 runs added to strengthen under-powered cells.
+
+Corpus: **435 runs analysed, 414 valid** (20 errored, 1 gated out).
+Single source of truth: `runs_campaign/campaign_master.csv`, one row per
+run, built by `campaign_master.py`. Figures come from that file and
+nothing else (`metrics/plots.py` → `figures/`).
+
+**Path correction:** `runs_sweep/` no longer exists; the R10 loss-sweep
+artefacts live in `runs_final/` (and a copy in `pilot_archive/`).
+References to `runs_sweep/detection_vs_loss.{csv,png}` earlier in this
+file point at a path that was renamed.
+
+---
+
+## R11. The trade-off is a property of the recovery ACTION, not of self-healing
+
+**The strongest result of the analysis phase, and it was invisible until
+coordination was measured properly.**
+
+`metrics/derived.py` computed `coordination_restored = shares[-1]` and
+`residual_mission_func = shares[-1]` — the same expression under two
+different security properties — while `coordination_loss` was mission
+degradation thresholded at 15 m. Coordination integrity (Table 3.13) was
+therefore never actually measured. `metrics/coordination.py` measures the
+two indicators Table 3.12 names: **phase divergence** (along-track lag
+behind the fleet) and **geometry deviation** (change in pairwise
+inter-UAV distance), both as an excess over the run's own pre-attack
+level. The legacy field is kept in the master file as
+`legacy_coordination_loss` for traceability and is NOT reported.
+
+### The contrast, inside architecture C
+
+| C, scenario | recovery action | phase | geometry | degradation |
+|---|---|---|---|---|
+| command_injection | guard(sysid) + resume mission | **0.2 m** | **0.1 m** | 0.4 m |
+| detector_takeout+gps | loiter | 172.9 m | 33.1 m | 0.2 m |
+
+Same architecture, same mesh, two recovery actions, opposite coordination
+outcomes. Where the action **restores mission execution**, C wins on
+every axis at once (A/B: phase ~154 m, geometry ~57 m). Where the action
+**parks the vehicle**, C buys containment with mission phase.
+
+### Why the asymmetry is structural, not sloppiness
+
+Command injection attacks the **command channel** — the state estimate
+stays valid, so the response can filter and re-issue the mission.
+GPS spoofing attacks **the state estimate itself** — after detection
+there is no trusted position left to navigate on, so any action that
+keeps flying the mission flies on a falsified frame. Measured: R4's
+loiter still drifted 50 m; the undetected run `1784210522` kept flying
+and was thrown to −83 m. Loiter is the conservative choice available
+within the PoC's sensor set, not a lazy one.
+
+**General principle for Ch.5:** the effectiveness of recovery is bounded
+by whether the attack compromised the information the recovery depends
+on. That covers both cells with one statement instead of praising one and
+excusing the other.
+
+### Per-cell medians [IQR], valid trials
+
+Phase divergence excess, m:
+
+| attack | A | B | C |
+|---|---|---|---|
+| detector_takeout+gps | 14.1 | 12.4 | **172.9 [169.0-176.8]** |
+| monitor_takeout+gps | 14.3 | 14.1 | 144.0 |
+| gps_spoofing | 15.3 | 16.3 | 139.5 |
+| command_injection | 154.1 | 151.9 | **0.2 [0.0-0.4]** |
+| comm_disruption | 104.0 | 114.0 | 124.4 |
+
+Geometry deviation excess, m:
+
+| attack | A | B | C |
+|---|---|---|---|
+| detector_takeout+gps | 74.7 | 74.2 | **33.1** |
+| monitor_takeout+gps | 74.1 | 74.5 | 52.7 |
+| gps_spoofing | 74.0 | 70.1 | 52.9 |
+| command_injection | 57.0 | 59.2 | **0.1** |
+| comm_disruption | 31.0 | 37.0 | 36.3 |
+
+### Two readings that must go in the text
+
+1. **`residual_mission_func` = 1.00 for C under detector_takeout is
+   misleading on its own.** By that metric the vehicle is fully
+   functional; physically it is 173 m behind the swarm and not flying the
+   mission. The two numbers must appear together or a reader will find
+   the contradiction unaided.
+2. **comm_disruption breaks coordination in ALL three architectures**
+   (~110 m phase, ~36 m geometry) — confirming the swarm-level effect
+   Table 3.12 predicts, which the legacy metric reported as 0.0 because
+   the vehicle stays within 15 m of the polyline. The equality across
+   architectures is honest: the link loss drops the vehicle into a PX4
+   failsafe, which is not a security-architecture effect and must not be
+   attributed to one.
+
+### Noise floor (measured, N=30/arch on clean runs — see R15)
+
+Median 0.1 m phase, 0.0 m geometry; IQR to 0.4 m. Tail is heavy:
+4 of 88 clean runs exceed 10 m phase, 2 of 88 exceed 30 m geometry, and
+one reached 190 m / 232 m with no attack at all (see R13 — it was a false
+positive that triggered an isolation). So:
+
+* **phase is the robust discriminator** — C's 173 m median sits far above
+  a tail that only one clean run in 88 reached;
+* **geometry is weaker** — C's 33 m median is at a level ~2% of healthy
+  runs reach spontaneously. Report it with the tail stated.
+
+---
+
+## R12. Mesh cost, measured rather than argued
+
+`mesh_cost` was recorded in every run and never reported.
+
+| arch | published msgs/run | published KB/run | delivered msgs/run | KB/s |
+|---|---|---|---|---|
+| A | 0 | 0 | 0 | 0 |
+| B | 0 | 0 | 0 | 0 |
+| C | 451 ± 26 | 117-122 | 902 ± 52 | 0.75 |
+
+A and B are **exactly** zero by construction (`NoOpMesh`), so the
+overhead is a measurement, not an estimate.
+
+Composition over the whole corpus: `peer_position` 39 198 messages
+against 486 for all security signalling combined (`isolation` 190,
+`recovery_ack` 148, `recovery_req` 148). **Essentially the entire cost of
+the mesh is the periodic position beacon; security coordination itself is
+almost free.** For the scaling discussion: the beacon grows as O(N²) in a
+fully-connected mesh, and 0.75 KB/s is the three-vehicle figure.
+
+---
+
+## R13. False positives: same rate, different blast radius
+
+Measured over clean operation — the pre-injection window of every attack
+run plus whole baseline runs (~190 min per architecture).
+
+| arch | runs with FP | events | by detector | events per FP-run |
+|---|---|---|---|---|
+| A | 6/137 (4.4%) | 13 | heartbeat 11, gps 2 | 3, 3, 2, 1, 1, 1 |
+| B | 9/140 (6.4%) | 15 | gps 9, heartbeat 6 | 3, 2, 1, 1, 1, 1, 1, 1, 1 |
+| C | 2/138 (1.4%) | 13 | cross_check 10, gps 3 | **8, 5** |
+
+Fisher exact on incident rate: C vs A p=0.172, C vs B p=0.060,
+A vs B p=0.597. **No evidence of a difference in how often a false alarm
+occurs.**
+
+**The defensible statement:** the architectures false-alarm at
+comparable rates; what differs is the radius. In A and B a false alarm
+stays where it fired (1-3 events); in C it propagates over the mesh and
+becomes a fleet-level event (5 and 8). The same channel that distributes
+a true signal distributes a false one — the cost is the mirror image of
+the benefit, not an additional one.
+
+Do NOT write "the mesh doubles the background noise" — an earlier reading
+of partial data suggested it and the full corpus refutes it: total event
+counts are 13 / 15 / 13.
+
+### The measured cost of one false positive
+
+`B_none_r4_1785487217`, a **baseline** run: a false `gps` detection fired,
+an `isolation_announce` followed, and the healthy fleet ended 190 m apart
+in phase and 232 m in geometry, `residual_mission_func` 0.67. This is the
+price of a false alarm measured on a clean run rather than asserted.
+
+**Accounting defect found here (fixed):** the FP counter used the run's
+`attack` marker as the end of the clean window, but a baseline run
+carries that marker at the nominal instant although nothing is injected.
+Everything after it was discarded, hiding exactly this case. Fixed in
+`campaign_extras.py` and in `campaign_master.py`.
+
+---
+
+## R14. OPEN-3 CLOSED — mechanism of non-detection, and a sensitivity curve
+
+**R9 predicted:** the signature is present but intermittent, so
+`sustained_samples` consecutive breaches never accumulate. It could not be
+tested — the only known non-detection predated the instrumentation.
+
+**The instrumented case now exists.** `run_A_gps_spoofing_r1_1785561888`:
+
+* spoof landed — belief `peak_horiz_m` = **50.29 m**;
+* residual reached the ceiling — `peak` = **2.0**;
+* first crossing at **+0.808 s**, the same instant as every detected run;
+* `n_above_threshold` = **2**, `max_consecutive_above` = **1**.
+
+Two samples breached and they were not adjacent. The rule needs three.
+Prediction confirmed: **signature present, sustain rule rejected it.**
+
+### Sensitivity of the shipped choice (`metrics/sustain.py`, zero re-runs)
+
+Recomputed offline from the stored `pos_horiz_ratio` series;
+scenario-filtered to plain `gps_spoofing` (45 runs) — `detector_takeout`
+is excluded because its local detector is silenced by design.
+
+| k | detection (post-attack window) | clean runs with FP |
+|---|---|---|
+| 1 | 45/45 = 1.00 | 4/90 = 0.04 |
+| 2 | 43/45 = 0.96 | 1/90 = 0.01 |
+| **3 (shipped)** | **43/45 = 0.96** | **1/90 = 0.01** |
+| 4 | 43/45 = 0.96 | 1/90 = 0.01 |
+| 5 | 40/45 = 0.89 | 1/90 = 0.01 |
+| 6 | 32/45 = 0.71 | 1/90 = 0.01 |
+
+Three readings:
+
+1. **k=3 sits on a plateau.** k=2, 3 and 4 give identical results — the
+   outcome is insensitive to the parameter across a wide range, which is
+   the strongest available defence of the choice.
+2. **The miss is not free to fix.** k=1 recovers it but quadruples the
+   false-positive rate (4/90 vs 1/90).
+3. **The 1/90 floor persists at every k≥2** — that clean run produced a
+   long sustained breach, so it is a genuine EKF excursion, not an
+   artefact of the rule.
+
+**Window definition (state it, do not hide it):** the live detector is
+causal and counts a breach run that began before injection; attributing
+detection to the attack does not. Post-attack window gives 43/45, full
+series 44/45. The difference is one run. Quote which one is used.
+
+---
+
+## R15. Campaign strengthening and harness validation
+
+150 runs added to remove under-powered cells. **All 150 completed, zero
+errors** — against the earlier wedged campaign's 300 consecutive
+failures. Short chunks (≤15) with a 300 s cooldown plus the `run_batch`
+circuit breaker are what changed; this belongs in Ch.4 as methodology,
+not as an anecdote.
+
+* `base_pass1-6` — 90 clean baseline runs (N=30/arch): noise floor for
+  R11 and the FP baseline for R13.
+* `gps_pass1-2`, `comm_pass1-2` — 60 runs lifting `gps_spoofing` and
+  `comm_disruption` from N=5 to N=15/arch.
+
+Effect: `comm_disruption` and `gps_spoofing` CIs moved from [0.57, 1.00]
+to [0.80, 1.00]; `comm_disruption × C` is no longer n=3; `none` reached
+N=35/arch with CI [0.00, 0.10].
+
+**New finding from the added runs:** `gps_spoofing × A` is 14/15, not
+15/15. The local GPS detector misses ~7% of landed spoofs — see R14 for
+the mechanism. Identical detector in all three architectures, so it
+cancels in the architectural comparison; it is a component property, as
+Ch.4 already states.
+
+### Provenance and exclusion flow (Ch.4 methodology)
+
+Of 657 runs on disk, only 435 enter the analysis:
+
+| set | runs | disposition |
+|---|---|---|
+| `smoke` | 12 | 1 run/cell, smoke test |
+| `pass1` | 60 | **pre-fix** — old recovery policy + fake injection filter |
+| `std_pass2/3`, `takeout_pass1-6` | 300 | 100% errored (wedged campaign) |
+| analysed roots | 435 | 20 errored, 1 gated out, **414 valid** |
+
+`campaign_master.py` flags every run against `POST_FIX_EPOCH =
+1785265956` (commit e2d2d3b) and reports the count; it is currently 0, so
+pre-fix contamination is checkable in the data rather than trusted to the
+operator.
+
+**`pass1` is not waste — it is the policy-ablation arm.** It measures the
+old destructive `restart_process` response to heartbeat loss at 36.65 m
+of mission deviation against 1.34 m for the current withhold policy. Ch.4
+can show, with data on both sides, that a mismatched response to an
+availability attack costs more than no response at all.
+
+---
+
+## R16. Inferential statistics (`metrics/stats.py`, `campaign_stats.py`)
+
+Wilson intervals state precision, not difference. Tests added: Fisher
+exact for detection cells, Newcombe intervals for differences of
+proportions, Mann-Whitney for MTTD, seeded bootstrap for differences of
+medians.
+
+**Primary family, declared in source before any p-value was inspected**
+(Holm-corrected over these four only):
+
+| comparison | result | p_adj |
+|---|---|---|
+| detector_takeout, C vs A | 30/30 vs 2/28, diff +0.93 [+0.74, +0.98] | 6.8e-14 |
+| detector_takeout, C vs B | 30/30 vs 3/30, diff +0.90 [+0.71, +0.97] | 1.9e-13 |
+| monitor_takeout, C vs A | 30/30 vs 2/28, diff +0.93 [+0.74, +0.98] | 6.8e-14 |
+| monitor_takeout, C vs B | 30/30 vs 29/30, diff +0.03 [-0.08, +0.17] | 1.00 (ns) |
+
+**One of the four pre-declared comparisons is null, and that is
+reported.** Under monitor_takeout it is centralisation that collapses;
+segmentation survives as well as the mesh does. A family in which every
+declared comparison succeeds invites the suspicion that it was chosen
+after the fact.
+
+Everything else is labelled exploratory and left uncorrected — including
+`monitor_takeout, B vs A` (29/30 vs 2/28, p < 0.001), which is the SPOF
+demonstration and was not pre-declared.
+
+---
+
+## Disclosure ledger (what goes in the thesis, and why)
+
+Rule: **disclose what changes how a reported number should be read; do
+not disclose what only changes the story of how it was obtained.**
+Development defects caught before the reported data are repository
+history, not scientific record.
+
+| item | in text? | reason |
+|---|---|---|
+| Validity gate + 1 excluded trial | **yes**, as method | affects the denominator; effect is 1 in 435, which itself answers the "post-hoc rule" objection |
+| Exclusion flow, N per cell, errored runs | **yes**, as method | reader must be able to reconstruct the sample |
+| Provenance: pre-fix batches excluded | **yes**, one line | data provenance, stated without the word "defect" |
+| Wedged campaign → chunked harness | **yes**, as methodology | justifies the run protocol; 150/150 clean afterwards |
+| Sustain-rule sensitivity curve (R14) | **yes** | sensitivity analysis; its absence would be the weakness |
+| Detection window definition (post vs full) | **yes**, one sentence | it is a definition, not a confession |
+| FP background with detector attribution | **yes** | separates component from architecture |
+| belief unreliable under monitor_takeout → trajectory validity | **yes**, as method | ground-truth selection |
+| `residual_mission_func` 1.00 alongside 173 m phase | **yes**, reconciled | a reader can derive the contradiction from published numbers |
+| Legacy `coordination_loss` duplicating `residual` | **no** | a draft metric that is not reported; the new one is |
+| FP accounting window defect (R13) | **no** | found and fixed before any reported number |
+| R5 `impact_scope` anchor defect | **no** | affected data that is not reported |
+| Analysis-script defects during this session | **no** | none reached a reported figure |
+
+Tone matters more than content here: sensitivity analysis, exclusion
+flow and FP characterisation are standard sections of strong empirical
+work. Write "we measured X and it behaves thus", never "unfortunately our
+detector sometimes fails".
+
+---
+
+## What remains (no simulation)
+
+1. Chapters 4-5 from R1-R16 above.
+2. Figures are built: `figures/fig1..fig7.{png,pdf}` from
+   `campaign_master.csv` via `metrics/plots.py`.
+3. Limitations stay limitations, not tasks: simulation-only, 3 vehicles,
+   and **no Byzantine case** — the adversary never makes a compromised
+   node inject false context into the mesh, while `cross_check` assumes
+   honest neighbours. That is the first thing a reviewer will probe and
+   the strongest single item for future work; the labelled dataset from
+   435 instrumented runs is already in place for it.
