@@ -11,31 +11,47 @@ drafts) and PDF (vector, for the bound copy).
 
 Figures — the published set is exactly seven
 --------------------------------------------
-fig1_detection      detection rate with Wilson 95% CI, per attack
-fig2_degradation    mission degradation, median + IQR
-fig3_coordination   coordination integrity: phase and geometry. Carries
-                    an on-canvas note, because in three of five cells C
-                    sits ABOVE the baselines and a reader left to the
-                    caption alone will read that as a defeat rather than
-                    as the R11 trade-off
+fig1_detection      detection rate, grouped bars + Wilson 95% CI + n
+fig2_degradation    mission degradation, median + IQR + n
+fig3_tradeoff       R11 inside architecture C: two recovery actions, two
+                    panels, LINEAR axes (in this module)
 fig4_recovery       time until the off-plan deviation stops growing, plus
                     recovery success rate as k/n (in `plots_extra`)
-fig5_falsepositive  clean-mode false positives by detector (exact counts
-                    from the master file, never a total split across a
-                    name list), and how far one false alarm spreads
-fig6_sustain        detection and false positives vs the sustain rule k.
-                    FP uses the FLEET maximum: a false alarm on a healthy
-                    swarm need not occur on the attack target.
+fig5_falsepositive  clean-mode false positives by detector, and how far
+                    one false alarm spreads
+fig6_sustain        detection and false positives vs the sustain rule k,
+                    two stacked panels sharing x
 fig7_losssweep      mesh-mediated detection vs channel loss (in
                     `plots_extra`)
 
-`fig_tradeoff` and `fig_mesh_cost` below are NO LONGER PUBLISHED and are
-not called by `main()`. The scatter restated fig3 with more ink and no
-extra conclusion; the mesh-cost bar chart was two zero bars and one bar,
-which is a table row, not a figure. The code is kept because both are
-correct and cheap to revive, not because the figures earned their place.
-A figure that carries no conclusion does not merely waste a page, it
-invites the reader to infer one that is not there.
+Chart-type discipline, learned the hard way
+-------------------------------------------
+Three unconventional forms were tried and all three were reverted:
+
+* dot-and-interval (forest) for detection rates — statistically the
+  better display for proportions, but a meta-analysis idiom that reads
+  as foreign in this literature;
+* log-scaled bars for the coordination trade-off — fixed one distortion
+  and introduced another, since 0.4 m and 0.1 m become visibly different
+  bars although both are effectively nothing;
+* twin y-axes for the sustain sweep — two scales on one frame invite
+  comparison between the curves, and their crossing point means nothing
+  yet reads as an event.
+
+Convention is worth more than the marginal statistical gain: a figure
+the reader has to decode is a figure that does not work. Everything is
+grouped bars or plain lines on linear axes; where a linear axis cannot
+hold the range, the data is split across panels rather than compressed.
+
+`_fig_detection_bars_unused`, `_fig_coordination_unused`,
+`_fig_scatter_unused` and `fig_mesh_cost` are NOT published and are not
+called by `main()`. The A-vs-B-vs-C coordination comparison belongs in a
+table: on a chart C's 173 m towers over the baselines' 14 m and reads as
+a defeat, when the baselines keep advancing along the route only because
+they never noticed the attack. The mesh-cost chart was two zero bars and
+one bar, which is a table row. A figure that carries no conclusion does
+not merely waste a page, it invites the reader to infer one that is not
+there.
 
 Usage
 -----
@@ -57,6 +73,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
+from metrics import style  # noqa: E402
 from metrics.stats import wilson_bounds  # noqa: E402
 
 ARCHS = ["A", "B", "C"]
@@ -207,12 +224,34 @@ def _grouped_bars(ax, rows: list, attacks: list, field: str,
 
 
 def fig_detection(rows: list, outdir: str) -> None:
+    """Grouped bars with Wilson intervals and n per cell.
+
+    A dot-and-interval version was tried and dropped: statistically it is
+    the better display for proportions, but it is a meta-analysis idiom
+    and reads as foreign in this literature. Convention is worth more
+    here than the marginal gain, because a figure the reader has to
+    decode is a figure that does not work.
+    """
     rows = valid_rows(rows)
     attacks = present_attacks(rows, skip_none=True)
-    fig, ax = plt.subplots(figsize=(8.4, 3.8))
+    fig, ax = plt.subplots(figsize=(8.6, 4.0))
     _grouped_bars(ax, rows, attacks, "detected", agg="rate")
     ax.set_ylabel("Частка виявлення (detection rate)")
-    ax.set_ylim(0, 1.06)
+    ax.set_ylim(0, 1.18)
+    for i, arch in enumerate(ARCHS):
+        for j, attack in enumerate(attacks):
+            sub = [r for r in rows if r["architecture"] == arch
+                   and r["attack"] == attack]
+            vals = [v for v in (flag(r, "detected") for r in sub)
+                    if v is not None]
+            if not vals:
+                continue
+            k, n = sum(1 for v in vals if v), len(vals)
+            ax.text(j + (i - 1) * 0.26, 1.09, "%d/%d" % (k, n),
+                    fontsize=6.5, ha="center", va="center", color="0.35")
+    ax.text(-0.62, 1.09, "вияв./n", fontsize=6.5, ha="center",
+            va="center", color="0.35")
+    ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
     _category_axis(ax, attacks)
     _legend_above(ax)
     save(fig, outdir, "fig1_detection")
@@ -224,12 +263,89 @@ def fig_degradation(rows: list, outdir: str) -> None:
     fig, ax = plt.subplots(figsize=(8.4, 3.8))
     _grouped_bars(ax, rows, attacks, "mission_degradation_m")
     ax.set_ylabel("Відхилення від місії, м\n(медіана, IQR)")
+    # n per cell: the cells are not equally sized (13 to 30 runs) and a
+    # reviewer asks for that before anything else
+    top = ax.get_ylim()[1] * 1.06
+    ax.set_ylim(0, top)
+    for i, arch in enumerate(ARCHS):
+        for j, attack in enumerate(attacks):
+            n = len([r for r in rows if r["architecture"] == arch
+                     and r["attack"] == attack
+                     and num(r, "mission_degradation_m") is not None])
+            if n:
+                ax.text(j + (i - 1) * 0.26, top * 0.995, str(n), fontsize=6.5,
+                        ha="center", va="top", color="0.35")
+    ax.text(-0.62, top * 0.995, "n:", fontsize=6.5, ha="center", va="top",
+            color="0.35")
     _category_axis(ax, attacks)
     _legend_above(ax)
     save(fig, outdir, "fig2_degradation")
 
 
-def fig_coordination(rows: list, outdir: str) -> None:
+def fig_tradeoff(rows: list, outdir: str) -> None:
+    """R11 as an internal contrast inside architecture C.
+
+    Two panels with ordinary linear axes rather than one panel on a log
+    scale. On a log axis 0.4 m and 0.1 m become visibly different bars
+    although both are effectively nothing, which is the same class of
+    distortion the figure exists to avoid. Separate panels keep every
+    axis linear and let the difference in axis RANGE (1 m against 200 m)
+    carry the message.
+
+    The A-vs-B-vs-C form of this comparison belongs in a table: on a
+    chart C's 173 m towers over the baselines' 14 m and reads as defeat,
+    when in fact the baselines keep advancing along the route only
+    because they never noticed the attack.
+    """
+    rows_v = [r for r in valid_rows(rows) if r["architecture"] == "C"]
+    fields = [
+        ("mission_degradation_m", "Відхилення\nвід місії", "0.85"),
+        ("phase_excess_m", "Фазове\nрозходження", "0.55"),
+        ("geometry_excess_m", "Зміна\nгеометрії", "0.25"),
+    ]
+    cells = [
+        ("command_injection",
+         "command injection\nдія: guard(sysid) + відновлення місії"),
+        ("detector_takeout+gps_spoofing",
+         "detector takeout + GPS\nдія: loiter (утримання позиції)"),
+    ]
+
+    fig, axes = plt.subplots(1, 2, figsize=(8.2, 3.9))
+    for ax, (attack, title) in zip(axes, cells):
+        sub = [r for r in rows_v if r["attack"] == attack]
+        vals, los, his = [], [], []
+        for field, _lbl, _sh in fields:
+            q = quartiles([num(r, field) for r in sub])
+            med, q1, q3, _n = q if q else (0.0, 0.0, 0.0, 0)
+            vals.append(med)
+            los.append(max(0.0, med - q1))
+            his.append(max(0.0, q3 - med))
+        xs = range(len(fields))
+        ax.bar(xs, vals, 0.55, yerr=[los, his], capsize=3,
+               color=[f[2] for f in fields], edgecolor="black",
+               linewidth=0.7)
+        top = max(max(v + h for v, h in zip(vals, his)), 1.0) * 1.30
+        ax.set_ylim(0, top)
+        for x, v, h in zip(xs, vals, his):
+            ax.text(x, v + h + top * 0.03, "%.1f" % v, fontsize=8.5,
+                    ha="center", va="bottom", color="0.15")
+        ax.set_xticks(list(xs))
+        ax.set_xticklabels([f[1] for f in fields], fontsize=8)
+        ax.set_title(title, fontsize=8.5)
+        ax.set_ylabel("м (медіана, IQR)")
+        ax.grid(axis="x", visible=False)
+        ax.text(0.5, 0.93, "n = %d" % len(sub), transform=ax.transAxes,
+                fontsize=7.5, ha="center", color="0.4")
+    fig.suptitle("Архітектура C: стримування досягнуто в обох випадках, "
+                 "різниця лише в ціні для координації", fontsize=9.5, y=1.10)
+    fig.text(0.5, 1.015, "Увага: масштаби вертикальних осей різні "
+             "(ліворуч до 1 м, праворуч до 200 м)",
+             fontsize=7.5, ha="center", color="0.35")
+    fig.tight_layout()
+    save(fig, outdir, "fig3_tradeoff")
+
+
+def _fig_coordination_unused(rows: list, outdir: str) -> None:
     rows_v = valid_rows(rows)
     attacks = present_attacks(rows_v)
     fig, axes = plt.subplots(2, 1, figsize=(8.6, 6.4), sharex=True)
@@ -251,10 +367,10 @@ def fig_coordination(rows: list, outdir: str) -> None:
                   edgecolor="0.6", linewidth=0.6, alpha=0.92))
     _legend_above(axes[0])
     _category_axis(axes[1], attacks)
-    save(fig, outdir, "fig3_coordination")
+    save(fig, outdir, "fig3_coordination_old")
 
 
-def fig_tradeoff(rows: list, outdir: str) -> None:
+def _fig_scatter_unused(rows: list, outdir: str) -> None:
     """Containment against synchronisation, one panel per scenario.
 
     Pooled, the clusters of different attacks overlap and the effect is
@@ -369,6 +485,14 @@ def fig_false_positives(rows: list, outdir: str) -> None:
 
 
 def fig_sustain(rows: list, outdir: str, ks=(1, 2, 3, 4, 5, 6)) -> None:
+    """Two stacked panels sharing x, not one panel with twin axes.
+
+    A twin-axis version was tried and dropped. Two different scales on
+    one frame invite the reader to compare the curves against each
+    other, and their crossing point — which means nothing at all — reads
+    as an event. Stacked panels keep each series on its own honest scale
+    while the shared x still shows that the two effects trade off.
+    """
     attack = [num(r, "ratio_maxcons_post") for r in rows
               if r["attack"] == "gps_spoofing" and not flag(r, "errored")]
     attack = [v for v in attack if v is not None]
@@ -376,25 +500,58 @@ def fig_sustain(rows: list, outdir: str, ks=(1, 2, 3, 4, 5, 6)) -> None:
              if r["attack"] == "none" and not flag(r, "errored")]
     clean = [v for v in clean if v is not None]
 
-    det = [sum(1 for v in attack if v >= k) / len(attack) if attack else 0.0
-           for k in ks]
-    fps = [sum(1 for v in clean if v >= k) / len(clean) if clean else 0.0
-           for k in ks]
+    det = [sum(1 for v in attack if v >= k) / len(attack) for k in ks]
+    fps = [sum(1 for v in clean if v >= k) / len(clean) for k in ks]
 
-    fig, ax = plt.subplots(figsize=(6.0, 3.6))
-    ax.plot(ks, det, "o-", color="black",
-            label="detection, gps_spoofing (n=%d)" % len(attack))
-    ax.plot(ks, fps, "s--", color="0.45",
-            label="FP-прогони, штатний режим (n=%d)" % len(clean))
-    ax.axvline(3, color="black", linewidth=0.8, linestyle=":")
-    ax.annotate("робоча точка\nk = 3", xy=(3, 0.30), xytext=(3.12, 0.22),
-                fontsize=8)
-    ax.set_xlabel("sustained_samples, k")
-    ax.set_ylabel("Частка прогонів")
-    ax.set_ylim(-0.03, 1.05)
-    ax.legend(fontsize=8, frameon=False, loc="center right")
-    ax.set_title("Чутливість до правила стійкості детектора", fontsize=9)
-    save(fig, outdir, "fig6_sustain")
+    style.apply()
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.8, 5.3), sharex=True,
+                                   gridspec_kw={"height_ratios": [1.35, 1]})
+
+    for ax in (ax1, ax2):
+        ax.axvspan(1.95, 4.05, color="#ECEFF2", zorder=0)
+        ax.axvline(3, color=style.ACCENT, linewidth=1.1, linestyle=":",
+                   zorder=1)
+
+    ax1.plot(ks, det, "o-", color=style.COLOR["C"], markersize=6,
+             linewidth=1.8)
+    ax1.set_ylabel("Частка виявлених атак\n(gps_spoofing, n=%d)" % len(attack))
+    ax1.set_ylim(0.62, 1.10)
+    for k, d in zip(ks, det):
+        ax1.annotate("%.2f" % d, (k, d), textcoords="offset points",
+                     xytext=(0, 8), ha="center", fontsize=7.5,
+                     color="#111827")
+    ax1.text(3.0, 1.055, "робоча точка k = 3", fontsize=8, ha="center",
+             va="top", color=style.ACCENT)
+
+    ax2.plot(ks, fps, "s-", color=style.COLOR["B"], markersize=6,
+             linewidth=1.8)
+    ax2.set_ylabel("Частка чистих прогонів\nіз хибним спрацюванням (n=%d)"
+                   % len(clean))
+    ax2.set_ylim(0, 0.075)
+    for k, f in zip(ks, fps):
+        ax2.annotate("%.3f" % f, (k, f), textcoords="offset points",
+                     xytext=(0, 8), ha="center", fontsize=7.5,
+                     color="#374151")
+    ax2.set_xlabel("Правило підтвердження sustained_samples, k")
+    ax2.set_xticks(list(ks))
+    for ax in (ax1, ax2):
+        style.despine(ax)
+
+    ax1.set_title("Плато k = 2…4: вибір правила підтвердження захищений з "
+                  "обох боків\n(менші k множать хибні тривоги, більші "
+                  "втрачають атаки)", fontsize=9.5)
+    # Вікна названі явно: у верхній панелі — пост-атакове (на чистому
+    # прогоні атаки немає, тому там береться вся серія). Без цього рядка
+    # два знаменники читаються як одне правило, а це різні правила.
+    fig.text(0.012, 0.012,
+             "Виявлення — пост-атакове вікно, %d прогонів gps_spoofing. "
+             "Хибні спрацювання — вся серія, %d чистих прогонів "
+             "(атаки немає, тому пост-атакового вікна теж немає)."
+             % (len(attack), len(clean)),
+             fontsize=7.4, color=style.MUTED, ha="left", va="bottom")
+    fig.subplots_adjust(bottom=0.175)
+    fig.align_ylabels([ax1, ax2])
+    save(fig, outdir, "fig4_2_sustain")
 
 
 def fig_mesh_cost(rows: list, outdir: str) -> None:
@@ -437,7 +594,7 @@ def main() -> None:
 
     fig_detection(rows, args.outdir)          # fig1
     fig_degradation(rows, args.outdir)        # fig2
-    fig_coordination(rows, args.outdir)       # fig3
+    fig_tradeoff(rows, args.outdir)           # fig3
     fig_recovery(rows, args.outdir)           # fig4
     fig_false_positives(rows, args.outdir)    # fig5
     fig_sustain(rows, args.outdir)            # fig6

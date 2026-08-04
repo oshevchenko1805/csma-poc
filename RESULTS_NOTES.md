@@ -855,8 +855,8 @@ run plus whole baseline runs (~190 min per architecture).
 
 | arch | runs with FP | events | by detector | events per FP-run |
 |---|---|---|---|---|
-| A | 6/136 (4.4%) | 13 | heartbeat 11, gps 2 | 3, 3, 2, 1, 1, 1 |
-| B | 9/140 (6.4%) | 15 | gps 9, heartbeat 6 | 3, 2, 1, 1, 1, 1, 1, 1, 1 |
+| A | 6/136 (4.4%) | 13 | heartbeat 11, gps 2 | 3, 3, 3, 2, 1, 1 |
+| B | 9/140 (6.4%) | 15 | gps 9, heartbeat 6 | 3, 3, 2, 2, 1, 1, 1, 1, 1 |
 | C | 2/138 (1.4%) | 13 | cross_check 10, gps 3 | **8, 5** |
 
 Fisher exact on incident rate: C vs A p=0.172, C vs B p=0.060,
@@ -913,21 +913,21 @@ is excluded because its local detector is silenced by design.
 
 | k | detection (post-attack window) | clean runs with FP |
 |---|---|---|
-| 1 | 45/45 = 1.00 | 4/90 = 0.04 |
-| 2 | 43/45 = 0.96 | 1/90 = 0.01 |
-| **3 (shipped)** | **43/45 = 0.96** | **1/90 = 0.01** |
-| 4 | 43/45 = 0.96 | 1/90 = 0.01 |
-| 5 | 40/45 = 0.89 | 1/90 = 0.01 |
-| 6 | 32/45 = 0.71 | 1/90 = 0.01 |
+| 1 | 45/45 = 1.00 | **6/105 = 0.057** |
+| 2 | 43/45 = 0.96 | 2/105 = 0.019 |
+| **3 (shipped)** | **43/45 = 0.96** | **2/105 = 0.019** |
+| 4 | 43/45 = 0.96 | 2/105 = 0.019 |
+| 5 | 40/45 = 0.89 | 2/105 = 0.019 |
+| 6 | 32/45 = 0.71 | 2/105 = 0.019 |
 
 Three readings:
 
 1. **k=3 sits on a plateau.** k=2, 3 and 4 give identical results — the
    outcome is insensitive to the parameter across a wide range, which is
    the strongest available defence of the choice.
-2. **The miss is not free to fix.** k=1 recovers it but quadruples the
-   false-positive rate (4/90 vs 1/90).
-3. **The 1/90 floor persists at every k≥2** — that clean run produced a
+2. **The miss is not free to fix.** k=1 recovers it but triples the
+   false-positive rate (6/105 vs 2/105).
+3. **The 2/105 floor persists at every k≥2** — those two clean runs produced a
    long sustained breach, so it is a genuine EKF excursion, not an
    artefact of the rule.
 

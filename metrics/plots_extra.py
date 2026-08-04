@@ -55,6 +55,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
+from metrics import style  # noqa: E402
 from metrics.stats import wilson_bounds  # noqa: E402
 from metrics.plots import (  # noqa: E402
     ARCHS, ARCH_LABEL, FILL, HATCH,
@@ -62,7 +63,8 @@ from metrics.plots import (  # noqa: E402
     save, _category_axis, _legend_above,
 )
 
-_TOP = 400.0      # top of the log axis for fig4
+_TOP = 68.0       # top of the linear axis for fig4
+_WINDOW_S = 60.0  # observation window after injection
 _BOTTOM = 0.05    # bottom of the log axis for fig4
 
 
@@ -82,17 +84,25 @@ def fig_recovery(rows: list, outdir: str) -> None:
     attacks = present_attacks(rows, skip_none=True)
 
     fig, ax = plt.subplots(figsize=(8.8, 4.6))
-    ax.set_yscale("log")
-    ax.set_ylim(_BOTTOM, _TOP)
+    ax.set_ylim(0, _TOP)
 
-    # room on the right for the band label, so it never sits on a bar
-    ax.set_xlim(-0.55, len(attacks) - 1 + 1.35)
-
-    # saturation band: where A and B land under every GPS scenario
+    # saturation band: where A and B land under every GPS scenario.
+    # Placed over the comm-disruption group, the only stretch of the band
+    # with no bars in it.
     ax.axhspan(40, 60, color="0.90", zorder=0)
-    ax.text(len(attacks) - 1 + 0.50, 49,
-            "смуга насичення\nспуфу 50 м:\nвідхилення\nперестає зростати\nсамо, без дії\nархітектури",
-            fontsize=6.5, ha="left", va="center", color="0.30", zorder=1)
+    ax.text(1.0, 50.0,
+            "смуга насичення\nспуфу 50 м: відхилення\nперестає зростати\n"
+            "само, без дії архітектури",
+            fontsize=6.3, ha="center", va="center", color="0.30", zorder=1,
+            bbox=dict(boxstyle="square,pad=0.25", facecolor="white",
+                      edgecolor="none", alpha=0.85))
+    # end of the observation window: bars are capped here, so nobody
+    # reads the height of a "never stabilised" bar as a measured value
+    ax.axhline(_WINDOW_S, color="0.35", linewidth=0.9, linestyle="--",
+               zorder=1)
+    ax.text(len(attacks) - 1 + 0.42, _WINDOW_S,
+            "кінець вікна\nспостереження", fontsize=6.5, ha="right",
+            va="bottom", color="0.35", zorder=3)
 
     width = 0.26
     labelled = set()
@@ -108,11 +118,15 @@ def fig_recovery(rows: list, outdir: str) -> None:
             if q is None:
                 # nothing in this cell ever stabilised: full-height bar,
                 # so the eye reads "longest of all", not "no data"
-                ax.bar([x], [_TOP - _BOTTOM], width, bottom=_BOTTOM,
-                       color="white", edgecolor="black", linewidth=0.9,
-                       hatch="xxx", label=lab, zorder=2)
-                ax.text(x, 3.0, "не настає", fontsize=7.5, rotation=90,
-                        ha="center", va="center", color="0.1", zorder=3,
+                ax.bar([x], [_TOP], width, color="white",
+                       edgecolor="black", linewidth=0.9, hatch="xxx",
+                       label=lab, zorder=2)
+                ax.annotate("", xy=(x, _TOP * 1.005), xytext=(x, _TOP * 0.86),
+                            arrowprops=dict(arrowstyle="-|>", color="black",
+                                            linewidth=1.1), zorder=3)
+                ax.text(x, _TOP * 0.45, "не настає", fontsize=7.5,
+                        rotation=90, ha="center", va="center", color="0.1",
+                        zorder=3,
                         bbox=dict(boxstyle="square,pad=0.15",
                                   facecolor="white", edgecolor="none"))
             else:
@@ -125,17 +139,20 @@ def fig_recovery(rows: list, outdir: str) -> None:
             labelled.add(arch)
 
             if n:
-                ax.text(x, _TOP * 1.12, "%d/%d" % (k, n), fontsize=6.5,
-                        ha="center", va="bottom", color="0.35")
+                # inside the axes: above the frame it collides with the
+                # legend, and the top strip here is free in every column
+                y_lab = (q[0] + max(0.0, q[2] - q[0]) + 1.6) if q else 62.0
+                ax.text(x, y_lab, "%d/%d" % (k, n), fontsize=6.5,
+                        ha="center", va="bottom", color="0.30", zorder=4,
+                        bbox=dict(boxstyle="square,pad=0.12",
+                                  facecolor="white", edgecolor="none",
+                                  alpha=0.85))
 
-    ax.set_ylabel("Час до припинення зростання відхилення\n"
-                  "від місійного плану, с (медіана, IQR)")
-    ax.set_yticks([0.1, 1, 10, 100])
-    ax.set_yticklabels(["0,1", "1", "10", "100"])
-    ax.text(0.988, 0.03, "менше = краще", transform=ax.transAxes,
-            fontsize=8, va="bottom", ha="right", color="0.25")
+    ax.set_ylabel("Час до припинення зростання відхилення від\n"
+                  "місійного плану, с (медіана, IQR; менше = краще)")
+    ax.set_yticks([0, 10, 20, 30, 40, 50, 60])
     _category_axis(ax, attacks)
-    ax.set_xlim(-0.55, len(attacks) - 1 + 1.35)   # _category_axis resets margins
+    ax.set_xlim(-0.55, len(attacks) - 1 + 0.55)
     _legend_above(ax, ncol=3)
     fig.text(0.5, -0.02,
              "Над стовпчиками: частка запусків, у яких відхилення "
@@ -163,22 +180,28 @@ def fig_loss_sweep(loss_csv: str, outdir: str) -> None:
         his.append(max(0.0, hi - centre))
         ns.append(n)
 
+    style.apply()
     fig, ax = plt.subplots(figsize=(7.6, 3.9))
     ax.errorbar(xs, ys, yerr=[los, his], marker="^", markersize=5,
-                color="0.15", ecolor="0.45", capsize=3, linewidth=1.2,
+                color=style.COLOR["C"], ecolor=style.COLOR["B"], capsize=3,
+                linewidth=1.6,
                 label="C — виявлення через mesh (cross_check)")
-    ax.axhline(0.0, color="0.55", linestyle="--", linewidth=1.0)
-    ax.text(0.655, 0.03, "A, B — без mesh, виявлення відсутнє",
-            fontsize=7.5, ha="right", va="bottom", color="0.35")
+    ax.axhline(0.0, color=style.EDGE["A"], linestyle="--", linewidth=1.0)
+    # Підпис A і B ставимо ліворуч від останньої точки: праворуч він
+    # упирався в рамку і обрізався.
+    ax.text(0.02, 0.035, "A, B — без mesh, виявлення відсутнє",
+            fontsize=7.8, ha="left", va="bottom", color=style.EDGE["A"])
 
     for x, y, n in zip(xs, ys, ns):
         ax.annotate("n=%d" % n, (x, y), textcoords="offset points",
-                    xytext=(0, 9), ha="center", fontsize=6.5, color="0.35")
+                    xytext=(0, 9), ha="center", fontsize=6.5,
+                    color=style.MUTED)
 
     ax.set_xlabel("Імовірність втрати повідомлення в mesh-середовищі")
     ax.set_ylabel("Частка виявлення (detection rate)")
     ax.set_ylim(-0.05, 1.08)
     ax.set_xticks(xs)
     ax.set_xticklabels(["%.2f" % x for x in xs], fontsize=8)
+    style.despine(ax)
     _legend_above(ax, ncol=1)
-    save(fig, outdir, "fig7_losssweep")
+    save(fig, outdir, "fig4_1_losssweep")
