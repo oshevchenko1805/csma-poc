@@ -995,11 +995,16 @@ medians.
 **Primary family, declared in source before any p-value was inspected**
 (Holm-corrected over these four only):
 
+⚠️ **Recomputed 2026-08-04 on the corrected detection gate.** The earlier
+figures in this table (+0.93, +0.90, +0.93 at p_adj 6.8e-14 … 1.9e-13)
+were computed on a `detected` field that counted pre-attack false
+positives as detections; see R18. They are void.
+
 | comparison | result | p_adj |
 |---|---|---|
-| detector_takeout, C vs A | 30/30 vs 2/28, diff +0.93 [+0.74, +0.98] | 6.8e-14 |
-| detector_takeout, C vs B | 30/30 vs 3/30, diff +0.90 [+0.71, +0.97] | 1.9e-13 |
-| monitor_takeout, C vs A | 30/30 vs 2/28, diff +0.93 [+0.74, +0.98] | 6.8e-14 |
+| detector_takeout, C vs A | 30/30 vs **0/28**, diff **+1.00 [+0.83, +1.00]** | 1.0e-16 |
+| detector_takeout, C vs B | 30/30 vs **0/30**, diff **+1.00 [+0.84, +1.00]** | 6.8e-17 |
+| monitor_takeout, C vs A | 30/30 vs **0/28**, diff **+1.00 [+0.83, +1.00]** | 1.0e-16 |
 | monitor_takeout, C vs B | 30/30 vs 29/30, diff +0.03 [-0.08, +0.17] | 1.00 (ns) |
 
 **One of the four pre-declared comparisons is null, and that is
@@ -1009,7 +1014,7 @@ declared comparison succeeds invites the suspicion that it was chosen
 after the fact.
 
 Everything else is labelled exploratory and left uncorrected — including
-`monitor_takeout, B vs A` (29/30 vs 2/28, p < 0.001), which is the SPOF
+`monitor_takeout, B vs A` (29/30 vs **0/28**, p < 0.001), which is the SPOF
 demonstration and was not pre-declared.
 
 ---
@@ -1059,6 +1064,85 @@ available defence of the threshold.
 **For the thesis:** one paragraph, no extra figure. Report that two of
 fifteen cells shift by one ordinal class at 20 m, name the boundary
 cause, and state that the architecture comparison is unaffected.
+
+---
+
+## R18. Detection was over-counted: the gate defect and its correction
+
+**Found in review on 2026-08-04, after the figure set had been declared
+finished.** Every detection number in the work rested on one line of
+`metrics/derived.py`:
+
+```python
+detected = _first_ts(events, "security") is not None
+```
+
+Any security event anywhere in the run made this True. No check that the
+event fell **after** the injection, and no check that it concerned the
+**attacked** UAV. A pre-attack false positive therefore counted as
+detecting the attack.
+
+### Scale
+
+Eight runs of 228. All eight were A or B under the takeout scenarios,
+plus one C run:
+
+| attack | A | B | C |
+|---|---|---|---|
+| detector takeout + GPS | 2/28 → **0/28** | 3/30 → **0/30** | 30/30 |
+| monitor takeout + GPS | 2/28 → **0/28** | 29/30 | 30/30 |
+| gps_spoofing | 14/15 | 15/15 | 15/15 → **14/15** |
+
+### How it was visible all along
+
+MTTD had the gate; `detected` did not. So the eight runs carried
+`detected == True` with an empty `mttd_s` — a contradiction inside a
+single row of the master file. That is now an enforced invariant in
+`campaign_master.py`, which prints offending run_ids and, run against the
+pre-fix master, names exactly these eight.
+
+### Why it happened
+
+The rule was already implemented correctly **twice**: `analyzer.py`
+(target and time) and `campaign_report.mttd` (time). The latter carries a
+comment describing this exact hazard — *"taking the first overall would
+catch a pre-attack false positive"*. The guard was written for MTTD and
+never applied to `detected`. Not ignorance: one definition living in
+three places, and drifting.
+
+### What the correction did to the result
+
+The rebuild moved **exactly 8 rows in exactly one column**, verified row
+by row. Degradation, phase, MTTR, mesh cost and false positives did not
+move.
+
+1. **The headline strengthened.** A and B go to exact zero under
+   detector takeout, against C at 30/30. Three of four pre-declared
+   comparisons become complete separation, +1.00 with Newcombe intervals
+   that exclude zero and reach one.
+2. **The declared null stayed null.** monitor_takeout C vs B remains
+   +0.03 [-0.08, +0.17], p_adj 1.00. The fix did not rescue it.
+3. **One reading genuinely changed.** Under plain GPS spoofing C is now
+   level with A at 14/15 each, where it previously showed 15/15 against
+   14/15. There is no general C advantage under ordinary spoofing. This
+   sharpens the claim that C's benefit is confined to attacks on the
+   security plane, and it must be stated that way in Ch.5.
+
+Point 2 is the defence of point 1: a correction that strengthened only
+what was already strong, and left the declared null untouched, is a
+correction rather than a fit.
+
+### Report it, do not bury it
+
+This belongs in the methodology as a measurement-definition statement:
+detection is counted only for security events attributable to the
+injected attack, by time and by target. That is a definition, not a
+confession. State the count of excluded events (8) so the denominator is
+reconstructible.
+
+**Also state 0/28 as 0.00 [0.00, 0.12], never as "never".** The rule
+against writing "100 %" without an interval applies symmetrically to
+zero, and with n=28 the upper bound is not small.
 
 ---
 
