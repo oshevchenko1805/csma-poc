@@ -208,6 +208,39 @@ def _first_ts(events: list, event_type: str) -> Optional[float]:
     return None
 
 
+def first_attack_detection_ts(events: list, t_attack: Optional[float],
+                              target: Optional[str]) -> Optional[float]:
+    """Перша security-подія, яку МОЖНА приписати атаці.
+
+    Два умови, обидві обовʼязкові:
+
+    1. `timestamp >= t_attack` — подія до інʼєкції не може бути
+       виявленням цієї інʼєкції. Це хибне спрацювання, і воно вже
+       рахується окремо в R13;
+    2. `target_uav == target` — подія про інший борт не є виявленням
+       атаки на цей борт.
+
+    Раніше `detected` рахувався як «існує будь-яка security-подія»
+    (без обох умов). Через це вісім прогонів A і B під takeout-сценаріями
+    рахувались виявленими за рахунок передатакових heartbeat- і
+    gps-спрацювань: у всіх них MTTD порожній, бо MTTD гейт мав, а
+    `detected` — ні. Те саме правило вже реалізоване в
+    `metrics/analyzer.py` і в `campaign_report.mttd`; тут воно приведене
+    до них, щоб визначення було одне на весь код.
+    """
+    if t_attack is None:
+        return None
+    for e in events:
+        if e.get("event_type") != "security":
+            continue
+        if float(e["timestamp"]) < t_attack:
+            continue
+        if target is not None and e.get("target_uav") != target:
+            continue
+        return float(e["timestamp"])
+    return None
+
+
 def _last_ts(events: list, types: tuple) -> Optional[float]:
     ts = [float(e["timestamp"]) for e in events if e.get("event_type") in types]
     return max(ts) if ts else None
@@ -344,7 +377,7 @@ def analyse_run(run_dir: str) -> Optional[DerivedMetrics]:
     detected = None
     isolation_success = None
     if is_attack_run and t_attack is not None:
-        detected = _first_ts(events, "security") is not None
+        detected = first_attack_detection_ts(events, t_attack, target) is not None
         # Isolation succeeded if no NON-target UAV ever left the plan
         # after the attack: the incident stayed confined to the target.
         spread = False

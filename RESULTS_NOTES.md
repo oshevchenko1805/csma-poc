@@ -1014,6 +1014,54 @@ demonstration and was not pre-declared.
 
 ---
 
+## R17. Regime map: threshold robustness (fig. 4.5)
+
+The 5 × 3 regime map encodes an ordinal outcome class per cell, and the
+classifier leans on one threshold: `ON_PLAN_M`. If the picture falls
+apart when that threshold moves, the picture is an artefact of the
+threshold rather than a result. Checked at 10, 15 and 20 m.
+
+Reproduce:
+
+```bash
+python -m metrics.plots_regime --sensitivity
+```
+
+| attack | 10 m | 15 m | 20 m |
+|---|---|---|---|
+| detector takeout + GPS | 0 0 3 | 0 0 3 | 0 0 3 |
+| monitor takeout + GPS | 0 1 2 | 0 1 2 | **0 1 3** |
+| command injection | 1 1 4 | 1 1 4 | 1 1 4 |
+| GPS spoofing | 1 1 2 | 1 1 2 | **1 1 3** |
+| comm disruption | 3 3 3 | 3 3 3 | 3 3 3 |
+
+**Two cells of fifteen move, both at 20 m, both in column C.** The cause
+is a boundary effect and nothing else: C's median mission degradation
+under those two scenarios is 19.75 m and 19.66 m, so at a 20 m threshold
+the aircraft stops counting as off-plan, falls through to the phase test
+(144 m and 146 m) and lands in class 3 instead of class 2.
+
+Three things this does **not** disturb:
+
+1. **No cell in column A or B changes at any threshold.** The A/B versus
+   C separation — the actual result — is entirely insensitive.
+2. **The four regime blocks are identical at all three thresholds.** Rows
+   group the same way, which is what the figure exists to show.
+3. **Classes 2 and 3 make the same claim about C** — damage contained,
+   paid for in coordination. Only the internal label of that claim moves.
+
+`ON_PLAN_M = 15` is not a figure-fitting choice: it is
+`ON_PLAN_TOLERANCE_M` from `metrics/derived.py`, introduced in `e337ee3`
+on 2026-07-28, a week before the regime map existed and before these
+cells were ever classified. State that in the text; it is the strongest
+available defence of the threshold.
+
+**For the thesis:** one paragraph, no extra figure. Report that two of
+fifteen cells shift by one ordinal class at 20 m, name the boundary
+cause, and state that the architecture comparison is unaffected.
+
+---
+
 ## Disclosure ledger (what goes in the thesis, and why)
 
 Rule: **disclose what changes how a reported number should be read; do

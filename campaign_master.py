@@ -254,12 +254,31 @@ def main() -> None:
     valid = sum(1 for r in rows if r["valid"])
     errored = sum(1 for r in rows if r["errored"])
     prefix = sum(1 for r in rows if r["post_fix"] is False)
+
+    # Інваріант: `detected` і MTTD походять з одного правила, тому
+    # «виявлено, але MTTD немає» неможливе за побудовою. Саме ця
+    # розбіжність була підписом дефекту `detected` (8 прогонів A і B під
+    # takeout-сценаріями рахувались виявленими за рахунок передатакових
+    # хибних спрацювань, і в усіх восьми MTTD був порожній). Визначення
+    # живе в трьох місцях — derived.py, analyzer.py, campaign_report.mttd
+    # — і вже одного разу розʼїхалось. Перевірка стоїть тут, бо це
+    # єдина точка, крізь яку проходить кожен прогін.
+    inconsistent = [
+        r["run_id"] for r in rows
+        if r["valid"] and r["detected"] is True and r["mttd_s"] is None
+    ]
     print("wrote %s" % args.csv)
     print("  runs          %d" % len(rows))
     print("  valid         %d" % valid)
     print("  errored       %d" % errored)
     print("  gated out     %d" % (len(rows) - valid - errored))
     print("  PRE-FIX runs  %d %s" % (prefix, "<-- MUST BE 0" if prefix else "(ok)"))
+    print("  detected w/o MTTD  %d %s"
+          % (len(inconsistent),
+             "<-- MUST BE 0, detection gate broken" if inconsistent
+             else "(ok)"))
+    for rid in inconsistent[:10]:
+        print("      %s" % rid)
 
     print("\n  false positives in clean operation (patched accounting):")
     print("  %-6s %8s %8s %12s %10s" % ("arch", "gps", "heartbeat",

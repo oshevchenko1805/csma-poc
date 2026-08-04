@@ -49,7 +49,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 
-from metrics.plots import load, num, flag, save, ARCHS  # noqa: E402
+from metrics.plots import (  # noqa: E402
+    load, num, flag, save, valid_rows, ARCHS,
+)
 
 # --- пороги ------------------------------------------------------------
 
@@ -209,14 +211,62 @@ def fig_regime_map(rows: list, outdir: str) -> None:
     save(fig, outdir, "fig4_5_regimes")
 
 
+def sensitivity(rows: list, thresholds=(10.0, 15.0, 20.0)) -> list:
+    """Чи тримається картина при інших порогах «на плані».
+
+    Класифікація спирається на один поріг, `ON_PLAN_M`. Якщо картина
+    розсипається при його зсуві, вона є артефактом порога, а не
+    результатом. Друкує сітку класів для кожного порога і позначає
+    рядки, де вона змінилася.
+
+    Викликається окремо, у набір рисунків не входить: це один абзац
+    тексту, а не рисунок.
+    """
+    global ON_PLAN_M
+    saved = ON_PLAN_M
+    attacks = [a for a, _ in ROWS]
+    grids = {}
+    try:
+        for t in thresholds:
+            ON_PLAN_M = t
+            g = []
+            for at in attacks:
+                cells = [cell_stats(rows, at, a) for a in ARCHS]
+                ref = max([c["degr"] for c in cells
+                           if c["degr"] is not None] or [0.0])
+                g.append([classify(c, ref) for c in cells])
+            grids[t] = g
+    finally:
+        ON_PLAN_M = saved
+
+    changed = []
+    head = "  ".join("%.0f м" % t for t in thresholds)
+    print("поріг «на плані»:".ljust(32), head)
+    for i, at in enumerate(attacks):
+        cols = [" ".join(str(v) for v in grids[t][i]) for t in thresholds]
+        same = len(set(cols)) == 1
+        if not same:
+            changed.append(at)
+        print(at.ljust(32), " | ".join(c.center(5) for c in cols),
+              "" if same else "  <- змінилася")
+    print("\nрядків змінилося: %d з %d" % (len(changed), len(attacks)))
+    return changed
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("master", nargs="?",
                    default="runs_campaign/campaign_master.csv")
     p.add_argument("--outdir", default="figures")
+    p.add_argument("--sensitivity", action="store_true",
+                   help="надрукувати перевірку стійкості порога, "
+                        "рисунок не будувати")
     a = p.parse_args()
     rows = load(a.master)
-    fig_regime_map(rows, a.outdir)
+    if a.sensitivity:
+        sensitivity(valid_rows(rows))
+    else:
+        fig_regime_map(rows, a.outdir)
 
 
 if __name__ == "__main__":
