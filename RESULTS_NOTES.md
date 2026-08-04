@@ -1212,19 +1212,47 @@ pre-attack windows of attack runs, and both are the cascades (8 and 5
 events). So the blast-radius claim rests on two observations in a
 different exposure class from A's and B's baseline events. Say so.
 
-### 19.4 "Blast radius" is currently an event count, not a radius
+### 19.4 Blast radius, now measured rather than named
 
-8 and 5 are **numbers of events**, not numbers of distinct vehicles or
-distinct actions. The name promises a spatial or topological spread that
-has not been measured. Until it is, call it **"каскад подій на один
-прогін із хибним спрацюванням"**.
+8 and 5 were **event counts**. Recounted from `merged.jsonl` of both C
+runs (now versioned in `figdata/`), and the answer is sharper than the
+event count was:
 
-Counting unique vehicles per cascade needs `merged.jsonl` for
-`C_gps_spoofing_r4_1785309955` and `C_command_injection_r1_1785410951`,
-neither of which is in `figdata/`. Two files; then the claim becomes
-measured rather than named. Table 3.14 introduced *False Positive Blast
-Radius* in advance, so the honest options are to measure it or to rename
-the row.
+| | `C_gps_spoofing_r4` | `C_command_injection_r1` |
+|---|---|---|
+| security events before injection | 8 | 5 |
+| **distinct accused vehicles** | **1** (`uav_0`) | **1** (`uav_1`) |
+| **distinct reporting monitors** | **3 of 3** | **3 of 3** |
+| detectors | cross_check 6, gps 2 | cross_check 4, gps 1 |
+| cascade duration | 16.1 s | 10.0 s |
+| isolation announcements | 7 | 5 |
+| recovery requests / acks | 4 / 4 | 3 / 3 |
+
+Three things this changes.
+
+1. **The radius is in reporters, not in victims.** One vehicle is accused;
+   every monitor in the fleet reports it. The alarm reaches the whole
+   swarm while the accusation stays on a single node.
+2. **The false alarm was not inert.** It produced 7 and 5 isolation
+   announcements and 4 and 3 executed recovery actions. A false positive
+   in C is not a log line, it is an action taken on a healthy vehicle.
+3. **The mechanism is identified.** 10 of C's 13 events are `cross_check`,
+   which exists only in C — A and B run `NoOpMesh` and have **zero**
+   cross_check events by construction (A: gps 2, heartbeat 11; B: gps 9,
+   heartbeat 6). The same channel that carries a true signal across the
+   mesh carries a false one. That is the mirror-image argument, and it is
+   now measured rather than asserted.
+
+**Two caveats to keep.** n = 2, and both are pre-attack windows of attack
+runs, not clean flights — on 35 clean flights C produced zero false
+positives (R19.3).
+
+**Not yet symmetric.** A's and B's largest cascades (3 events each, e.g.
+`A_none_r2_1785303964`, `B_none_r3_1785483357`) have not been counted by
+reporter, so "3 of 3 monitors in C" has no measured counterpart in A and
+B. The structural argument holds without it — no mesh, no cross_check —
+but if the radius is to be reported as a comparison, those two runs need
+the same treatment.
 
 ---
 
