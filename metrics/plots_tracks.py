@@ -75,10 +75,14 @@ ROWS = [
         label="GPS spoofing",
         ylim=(-54.0, 34.0),
         notes={
-            "A": "атаку виявлено, коригувальну дію не застосовано;\n"
-                 "відхилення досягло межі інжектованого зміщення",
-            "B": "атаку виявлено, коригувальну дію не застосовано;\n"
-                 "відхилення досягло межі інжектованого зміщення",
+            # Три короткі рядки, а не два довгі: у двох сусідніх панелей
+            # довгі рядки змикались один з одним по горизонталі.
+            "A": "атаку виявлено, коригувальну дію\n"
+                 "не застосовано; відхилення досягло\n"
+                 "межі інжектованого зміщення",
+            "B": "атаку виявлено, коригувальну дію\n"
+                 "не застосовано; відхилення досягло\n"
+                 "межі інжектованого зміщення",
             "C": "стримування через loiter",
         },
     ),
@@ -215,22 +219,39 @@ def draw_panel(ax, rid: str, dev: float, ylim, note: str):
             color=TARGET, lw=1.6, zorder=4, solid_capstyle="round")
 
     ms = milestones(run["events"], tgt)
-    # Виявлення і дія розділені сотими долями секунди, тому лягають в
-    # одну точку треку. Темне кільце навколо хреста чесніше, ніж рознести
-    # маркери штучно.
-    coincide = ("recovery" in ms and "detect" in ms
-                and abs(ms["recovery"] - ms["detect"]) < 0.5)
+
+    # Події часто збігаються в часі: при command injection виявлення
+    # настає через 0.01 с після інʼєкції, а дія ще через 0.01 с, тобто
+    # всі три маркери лягають в ОДНУ вибірку треку (~5 Гц). Рознести їх
+    # по треку означало б показати рух, якого не було, тому вони
+    # малюються концентрично: інʼєкція — зовнішнє кільце, виявлення —
+    # внутрішнє, дія — хрест у центрі. Розміри підібрані так, щоб кожен
+    # маркер лишався видимим крізь наступний.
+    COINCIDE_S = 0.5
+    same = {}
+    for a in ("detect", "recovery"):
+        same[a] = ("inject" in ms and a in ms
+                   and abs(ms[a] - ms["inject"]) < COINCIDE_S)
+    nested = any(same.values())
+
     if "inject" in ms:
         x, y = at_time(t, ms["inject"])
-        ax.plot(x, y, "o", ms=8, mfc="white", mec=ACCENT, mew=1.8, zorder=6)
+        ax.plot(x, y, "o", ms=17 if nested else 9,
+                mfc="none", mec=ACCENT, mew=2.2, zorder=6)
     if "detect" in ms:
         x, y = at_time(t, ms["detect"])
-        ax.plot(x, y, "o", ms=12 if coincide else 7,
-                mfc=TARGET, mec="white", mew=1.0, zorder=6)
+        if same["detect"] and same.get("recovery"):
+            # три події в одній точці: виявлення як кільце, щоб хрест
+            # усередині лишався видимим
+            ax.plot(x, y, "o", ms=11, mfc="none", mec=TARGET, mew=2.2,
+                    zorder=7)
+        else:
+            ax.plot(x, y, "o", ms=9 if same["detect"] else 8,
+                    mfc=TARGET, mec="white", mew=1.2, zorder=7)
     if "recovery" in ms:
         x, y = at_time(t, ms["recovery"])
-        ax.plot(x, y, "X", ms=8 if coincide else 10,
-                mfc=ACCENT, mec="white", mew=1.0, zorder=7)
+        ax.plot(x, y, "X", ms=8 if nested else 11,
+                mfc=ACCENT, mec="white", mew=1.2, zorder=8)
 
     ax.set_xlim(*XLIM)
     ax.set_ylim(*ylim)
@@ -240,17 +261,20 @@ def draw_panel(ax, rid: str, dev: float, ylim, note: str):
 
 
 def legend_handles():
+    # «Коригувальна дія», а не «дія відновлення»: у command injection це
+    # `filter_commands`, тобто блокування підмінених команд, а не
+    # відновлення у вузькому сенсі. Одна назва має покривати обидва ряди.
     return [
-        Line2D([], [], color=TARGET, lw=1.6, label="атакований апарат"),
-        Line2D([], [], color=OTHER, lw=1.6, label="два інші апарати"),
-        Line2D([], [], color=PLAN, lw=1.0, ls=(0, (5, 3)),
+        Line2D([], [], color=TARGET, lw=2.0, label="атакований апарат"),
+        Line2D([], [], color=OTHER, lw=2.0, label="два інші апарати"),
+        Line2D([], [], color=PLAN, lw=1.2, ls=(0, (5, 3)),
                label="місійний маршрут"),
-        Line2D([], [], marker="o", ls="none", ms=8, mfc="white", mec=ACCENT,
-               mew=1.8, label="інʼєкція"),
-        Line2D([], [], marker="o", ls="none", ms=7, mfc=TARGET, mec="white",
+        Line2D([], [], marker="o", ls="none", ms=10, mfc="none", mec=ACCENT,
+               mew=2.2, label="інʼєкція"),
+        Line2D([], [], marker="o", ls="none", ms=9, mfc=TARGET, mec="white",
                label="виявлення"),
-        Line2D([], [], marker="X", ls="none", ms=9, mfc=ACCENT, mec="white",
-               label="дія відновлення"),
+        Line2D([], [], marker="X", ls="none", ms=10, mfc=ACCENT, mec="white",
+               label="коригувальна дія"),
     ]
 
 
@@ -259,9 +283,9 @@ def build(outdir: str = "figures", name: str = "fig4_3_tracks"):
     picks = select_runs()
 
     spans = [r["ylim"][1] - r["ylim"][0] for r in ROWS]
-    fig, axes = plt.subplots(2, 3, figsize=(12.6, 14.0),
+    fig, axes = plt.subplots(2, 3, figsize=(12.6, 14.6),
                              gridspec_kw={"height_ratios": spans})
-    fig.subplots_adjust(left=0.105, right=0.985, top=0.900, bottom=0.235,
+    fig.subplots_adjust(left=0.105, right=0.985, top=0.900, bottom=0.255,
                         wspace=0.10, hspace=0.40)
 
     for i, row in enumerate(ROWS):
@@ -288,24 +312,25 @@ def build(outdir: str = "figures", name: str = "fig4_3_tracks"):
             b = boxes[j]
             cx = b.x0 + b.width / 2.0
             if i == 0:
-                fig.text(cx, b.y1 + 0.008, ARCH_LABEL[arch], fontsize=10.5,
+                fig.text(cx, b.y1 + 0.008, ARCH_LABEL[arch], fontsize=11.5,
                          fontweight="bold", ha="center", va="bottom",
                          color="#111827")
-            fig.text(cx, b.y0 - 0.032, "відхилення від місії %.1f м" % dev,
-                     fontsize=9.0, fontweight="bold", ha="center", va="top",
+            fig.text(cx, b.y0 - 0.030, "відхилення від місії %.1f м" % dev,
+                     fontsize=11.0, fontweight="bold", ha="center", va="top",
                      color="#111827")
-            fig.text(cx, b.y0 - 0.049, row["notes"][arch], fontsize=8.2,
-                     ha="center", va="top", color=MUTED, linespacing=1.6)
+            fig.text(cx, b.y0 - 0.050, row["notes"][arch], fontsize=10.0,
+                     ha="center", va="top", color="#1F2937",
+                     linespacing=1.55)
 
         fig.text(boxes[0].x0 - 0.072,
                  (boxes[0].y0 + boxes[0].y1) / 2.0,
                  "%s\ny ∈ [%+.0f; %+.0f] м"
                  % (row["label"], row["ylim"][0], row["ylim"][1]),
-                 fontsize=10.5, fontweight="bold", rotation=90,
+                 fontsize=11.5, fontweight="bold", rotation=90,
                  ha="center", va="center", color="#111827", linespacing=1.9)
 
     fig.legend(handles=legend_handles(), loc="lower center", ncol=6,
-               bbox_to_anchor=(0.5, 0.092), fontsize=8.8)
+               bbox_to_anchor=(0.5, 0.098), fontsize=10.2)
 
     fig.suptitle("Фізичні наслідки GPS spoofing та command injection "
                  "у трьох архітектурних конфігураціях",
@@ -315,16 +340,21 @@ def build(outdir: str = "figures", name: str = "fig4_3_tracks"):
              "Ґрунтова істина Gazebo, ~5 Гц. У кожній комірці показано "
              "прогін, найближчий до медіани відхилення від місії "
              "в цій комірці.",
-             fontsize=8.6, color=MUTED, ha="left")
+             fontsize=10.0, color="#374151", ha="left")
 
-    fig.text(0.075, 0.055,
+    fig.text(0.075, 0.062,
              "У межах кожного ряду використано спільні осі; між рядами "
              "масштаби можуть відрізнятися, оскільки порівнюються різні "
              "типи атак. Масштаб по x і y всередині\n"
              "кожної панелі однаковий. Прогони не є парними реалізаціями "
-             "зі спільним seed, тому рисунок ілюструє механізм, а не "
-             "доводить причинність. MTTD між рядами\nне зіставляється.",
-             fontsize=8.2, color=MUTED, ha="left", va="top", linespacing=1.7)
+             "зі спільним seed, тому рисунок ілюструє механізм, а не\n"
+             "доводить причинність. MTTD між рядами не зіставляється. "
+             "Події, що збіглися в часі (частки секунди, як при command "
+             "injection), показані концентрично:\nінʼєкція — зовнішнє "
+             "кільце, виявлення — внутрішнє, коригувальна дія — хрест у "
+             "центрі.",
+             fontsize=9.8, color="#1F2937", ha="left", va="top",
+             linespacing=1.7)
 
     save(fig, outdir, name)
 
