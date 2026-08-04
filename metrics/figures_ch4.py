@@ -1,7 +1,7 @@
 """
 metrics/figures_ch4.py — єдина точка входу для набору рисунків розділу 4.
 
-Одна команда збирає рівно пʼять рисунків і нічого більше:
+Одна команда збирає рівно чотири рисунки і нічого більше:
 
     python -m metrics.figures_ch4
 
@@ -11,16 +11,26 @@ metrics/figures_ch4.py — єдина точка входу для набору 
 | `fig4_2_sustain`   | плато правила підтвердження k          | `campaign_master.csv` + збережені ряди |
 | `fig4_3_tracks`    | що фізично робить відновлення          | `figdata/` — три медіанні прогони |
 | `fig4_4_tradeoff`  | розмен стримування × координація       | `campaign_master.csv` |
-| `fig4_5_regimes`   | карта режимів 5 × 3, синтез            | `campaign_master.csv` |
+
+**Карта режимів 5 × 3 вилучена з набору** (рецензія 4 серпня). Вона
+кодувала в комірці порядковий клас 0…4, і три заперечення виявились
+незакривними: порядок між класами вигаданий, клас «відновлено повністю»
+не спирався на жодну міру відновлення, а дужки режимів назначені за тим,
+який шар атаковано, тобто за вхідними даними. Її зміст тепер подається
+таблицею, яка вміщує застереження:
+
+    python -m metrics.plots_regime --table
+
+Забракований рисунок будується прапорцем `--figure`, у набір не входить.
 
 Нумерація — за `FIGURE_SPECS.md`, тобто за порядком появи в тексті
-розділу, який побудований за пʼятьма security properties:
-Q1 detection дає 4.1 і 4.2, Q3 recovery дає 4.3, Q4 і Q5 разом дають
-4.4, синтез дає 4.5. Розбіжна нумерація в
+розділу, який побудований за пʼятьма security properties: Q1 detection
+дає 4.1 і 4.2, Q3 recovery дає 4.3, Q4 і Q5 разом дають 4.4. Синтез
+рисунка більше не має. Розбіжна нумерація в
 `CH45_QUESTIONS_ANSWERS_FIGURES.md` (де карта режимів була 4.1)
 вважається застарілою.
 
-Чому саме пʼять, а не чотирнадцять: матеріал для рисунка це залежність
+Чому саме чотири, а не чотирнадцять: матеріал для рисунка це залежність
 від параметра, розподіл або фізика. Матриця 5 × 3, у якій одинадцять
 комірок із пʼятнадцяти збігаються, — це таблиця, і розділ 3 це прямо
 дозволяє («відсутність відмінності є самостійним висновком»). Перелік
@@ -36,7 +46,6 @@ import argparse
 
 from metrics.plots import load, valid_rows, fig_sustain
 from metrics.plots_extra import fig_loss_sweep
-from metrics.plots_regime import fig_regime_map
 from metrics.plots_tradeoff import fig_tradeoff
 from metrics.plots_tracks import build as build_tracks
 
@@ -59,9 +68,10 @@ def main() -> None:
     fig_sustain(rows, args.outdir)                      # 4.2
     build_tracks(True, args.outdir, "fig4_3_tracks")    # 4.3
     fig_tradeoff(rows, args.outdir)                     # 4.4
-    fig_regime_map(rows, args.outdir)                   # 4.5
 
-    print("готово: пʼять рисунків, PNG 300 dpi і PDF-вектор")
+    print("готово: чотири рисунки, PNG 300 dpi і PDF-вектор")
+    print("карта режимів подається таблицею: "
+          "python -m metrics.plots_regime --table")
 
 
 if __name__ == "__main__":
