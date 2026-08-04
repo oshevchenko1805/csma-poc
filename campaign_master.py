@@ -287,7 +287,13 @@ def main() -> None:
     fp_runs = collections.Counter()
     runs_by_arch = collections.Counter()
     for r in rows:
-        if r["errored"]:
+        # Той самий фільтр, що й у звітній таблиці R13: `valid`, а не
+        # просто «не впав». Раніше тут стояло `if r["errored"]`, через що
+        # знаменник у діагностиці був 137 для A проти 136 у тексті —
+        # рівно на той один прогін, який відсіяв валідаційний гейт.
+        # Для B і C числа збігались, бо відсіяний прогін був у A, і
+        # розбіжність видно було лише в одному рядку з трьох.
+        if not r["valid"]:
             continue
         arch = str(r["architecture"])
         runs_by_arch[arch] += 1
