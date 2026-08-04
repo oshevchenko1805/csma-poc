@@ -1,0 +1,18 @@
+run_id,architecture,attack,exposure,target_uav,fp_events,accused_uavs,reporting_monitors,isolation_events,recovery_requests,recovery_acks,cascade_span_s,detectors,accused_list,monitor_list,mission_degradation_m,phase_excess_m,residual_mission_func
+A_detector_takeout+gps_spoofing_r1_1785415995,A,detector_takeout+gps_spoofing,pre_attack,uav_0,3,3,3,3,0,0,0.06,heartbeat:3,uav_0|uav_1|uav_2,monitor_ground_station_uav_0|monitor_ground_station_uav_1|monitor_ground_station_uav_2,49.837185968967084,7.24995002944712,0.6666666666666666
+A_detector_takeout+gps_spoofing_r2_1785416216,A,detector_takeout+gps_spoofing,pre_attack,uav_0,2,2,2,2,0,0,0.03,heartbeat:2,uav_0|uav_2,monitor_ground_station_uav_0|monitor_ground_station_uav_2,49.935158128163245,2.1395398849950027,0.6666666666666666
+A_monitor_takeout+gps_spoofing_r1_1785452152,A,monitor_takeout+gps_spoofing,pre_attack,uav_0,1,1,1,1,0,0,0.0,gps:1,uav_2,monitor_ground_station_uav_2,49.92667016638819,102.43469357645054,0.3333333333333333
+A_monitor_takeout+gps_spoofing_r3_1785445395,A,monitor_takeout+gps_spoofing,pre_attack,uav_0,1,1,1,1,0,0,0.0,gps:1,uav_2,monitor_ground_station_uav_2,49.94247990131324,0.0,0.3333333333333333
+A_none_r2_1785303964,A,none,clean_flight,uav_0,3,3,3,3,0,0,0.03,heartbeat:3,uav_0|uav_1|uav_2,monitor_ground_station_uav_0|monitor_ground_station_uav_1|monitor_ground_station_uav_2,,2.3109598790443897,0.6666666666666666
+A_none_r2_1785485662,A,none,clean_flight,uav_0,3,3,3,3,0,0,0.01,heartbeat:3,uav_0|uav_1|uav_2,monitor_ground_station_uav_0|monitor_ground_station_uav_1|monitor_ground_station_uav_2,,,
+B_detector_takeout+gps_spoofing_r2_1785424521,B,detector_takeout+gps_spoofing,pre_attack,uav_0,1,1,1,1,0,0,0.0,gps:1,uav_2,monitor_uav_2_uav_2,49.87142142673967,0.0,0.6666666666666666
+B_detector_takeout+gps_spoofing_r4_1785424964,B,detector_takeout+gps_spoofing,pre_attack,uav_0,1,1,1,1,0,0,0.0,gps:1,uav_1,monitor_uav_1_uav_1,49.736249407761626,0.0,0.3333333333333333
+B_detector_takeout+gps_spoofing_r5_1785436066,B,detector_takeout+gps_spoofing,pre_attack,uav_0,1,1,1,1,0,0,0.0,gps:1,uav_1,monitor_uav_1_uav_1,49.73636044255634,11.992795787089449,0.6666666666666666
+B_gps_spoofing_r4_1785570926,B,gps_spoofing,pre_attack,uav_0,2,1,1,1,0,0,10.09,gps:2,uav_2,monitor_uav_2_uav_2,49.623844046200915,0.0,0.3333333333333333
+B_monitor_takeout+gps_spoofing_r4_1785443097,B,monitor_takeout+gps_spoofing,pre_attack,uav_0,1,1,1,1,0,0,0.0,gps:1,uav_2,monitor_uav_2_uav_2,49.997027190658464,38.1915504314436,0.6666666666666666
+B_none_r3_1785305297,B,none,clean_flight,uav_0,2,1,1,1,0,0,6.08,gps:2,uav_1,monitor_uav_1_uav_1,,83.91178279391704,0.6666666666666666
+B_none_r3_1785483357,B,none,clean_flight,uav_0,3,3,3,3,0,0,0.03,heartbeat:3,uav_0|uav_1|uav_2,monitor_uav_0_uav_0|monitor_uav_1_uav_1|monitor_uav_2_uav_2,,0.9592334174291182,0.6666666666666666
+B_none_r3_1785486994,B,none,clean_flight,uav_0,3,3,3,3,0,0,1.03,heartbeat:3,uav_0|uav_1|uav_2,monitor_uav_0_uav_0|monitor_uav_1_uav_1|monitor_uav_2_uav_2,,,
+B_none_r4_1785487217,B,none,clean_flight,uav_0,1,1,1,1,0,0,0.0,gps:1,uav_1,monitor_uav_1_uav_1,,190.00085114128456,0.6666666666666666
+C_command_injection_r1_1785410951,C,command_injection,pre_attack,uav_0,5,1,3,5,3,3,10.0,cross_check:4 gps:1,uav_1,monitor_uav_0|monitor_uav_1|monitor_uav_2,34.50400041684999,143.69746214081565,0.3333333333333333
+C_gps_spoofing_r4_1785309955,C,gps_spoofing,pre_attack,uav_0,8,1,3,7,4,4,16.14,cross_check:6 gps:2,uav_0,monitor_uav_0|monitor_uav_1|monitor_uav_2,3.2396900996165385,0.0,0.6666666666666666
