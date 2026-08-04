@@ -1146,6 +1146,88 @@ zero, and with n=28 the upper bound is not small.
 
 ---
 
+## R19. Three metric-semantics fixes found in review, 2026-08-04
+
+R18 fixed `detected`. This closes the rest of the same class: places where
+the number was right but what it MEANT was not.
+
+### 19.1 The attribution gate now covers every event time
+
+`detected` was gated on 4 August; `t_detect`, `t_isolate` and
+`t_last_rec` were not, and still took the first or last event anywhere in
+the run. Eleven attack runs carry pre-attack false positives, so:
+
+* **`time_to_isolation_s`** — corpus maximum was 59 119 µs against 548 µs
+  once those runs are excluded. **This is where "40-59 µs" in the text
+  came from: 59 milliseconds read as 59 microseconds.** The median, 52 µs,
+  was never wrong. Correct statement: median 52 µs, maximum 548 µs.
+* **`mttr_functional_s`** — the anchor is `t_isolate`, so a pre-attack
+  isolation put the origin of the measurement BEFORE the attack. Those ten
+  runs read 70-127 s against cell medians of 51-54 s. **The medians held**
+  (they moved by at most 0.13 s), so no reported median changes; the
+  individual values and any IQR did.
+* **`total_response_time_s`** — the two negative values.
+
+One helper, `attributable_ts`, now serves all of them: event at or after
+the injection, and about the attacked vehicle. Six regression tests.
+
+### 19.2 `isolation_success` was never about isolation
+
+The field asked one question: did any NON-target vehicle leave the plan
+after the attack? That is **containment** — the incident stayed confined
+to the target — not evidence that an isolation mechanism worked. Isolation
+in the PoC is an in-process operation, identical in all three
+configurations, so nothing here could distinguish them.
+
+Chapter 3 already defines the metric correctly: *"частка запусків, у яких
+інцидент було стримано без неконтрольованого поширення"*. So the rename to
+`containment_success` brings the CODE into line with the thesis, not the
+other way round. Report it as **"частка прогонів без поширення наслідків
+за межі цільового борту"**.
+
+### 19.3 Two false-positive rates were being quoted as one
+
+They are different measurements with different exposure and must never
+share a name:
+
+| | clean baseline flights (`attack == none`) | all valid runs, clean window |
+|---|---|---|
+| A | 2/35 runs, 6 events | 6/136 runs, 13 events |
+| B | 4/35 runs, 9 events | 9/140 runs, 15 events |
+| C | **0/35 runs, 0 events** | 2/138 runs, 13 events |
+
+The second column pools whole baseline flights with the pre-injection
+segment of attack runs. Those are not the same exposure, so the pooled
+figure is an incidence, not a rate. Name them separately:
+
+* **фонова частота хибних тривог** — the first column, clean flights only;
+* **частка прогонів із хибним спрацюванням у чистому вікні** — the second.
+
+Both point the same way (C is not noisier), so nothing rests on the choice
+— but the choice has to be stated.
+
+**A consequence that changes how R13 must be written.** C has **zero**
+false positives across 35 clean flights. Both of its FP runs are
+pre-attack windows of attack runs, and both are the cascades (8 and 5
+events). So the blast-radius claim rests on two observations in a
+different exposure class from A's and B's baseline events. Say so.
+
+### 19.4 "Blast radius" is currently an event count, not a radius
+
+8 and 5 are **numbers of events**, not numbers of distinct vehicles or
+distinct actions. The name promises a spatial or topological spread that
+has not been measured. Until it is, call it **"каскад подій на один
+прогін із хибним спрацюванням"**.
+
+Counting unique vehicles per cascade needs `merged.jsonl` for
+`C_gps_spoofing_r4_1785309955` and `C_command_injection_r1_1785410951`,
+neither of which is in `figdata/`. Two files; then the claim becomes
+measured rather than named. Table 3.14 introduced *False Positive Blast
+Radius* in advance, so the honest options are to measure it or to rename
+the row.
+
+---
+
 ## Disclosure ledger (what goes in the thesis, and why)
 
 Rule: **disclose what changes how a reported number should be read; do

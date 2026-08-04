@@ -208,6 +208,48 @@ def _first_ts(events: list, event_type: str) -> Optional[float]:
     return None
 
 
+def attributable_ts(events: list, t_attack: Optional[float],
+                    target: Optional[str], types: tuple,
+                    last: bool = False) -> Optional[float]:
+    """Час події, яку МОЖНА приписати цій атаці.
+
+    Єдиний гейт атрибуції для ВСІХ подієвих часів. Дві умови:
+
+    1. `timestamp >= t_attack` — подія до інʼєкції не є наслідком цієї
+       інʼєкції;
+    2. `target_uav == target` — подія про інший борт теж не є.
+
+    Раніше гейт мав тільки `detected`, а `t_detect`, `t_isolate` і
+    `t_last_rec` бралися по всьому прогону через `_first_ts`/`_last_ts`.
+    Наслідки, виміряні на корпусі (11 атакуючих прогонів мали
+    передатакові хибні спрацювання):
+
+    * `time_to_isolation_s` — максимум по корпусу 59 119 мкс проти
+      548 мкс без цих прогонів. Саме звідси в тексті взялося «40-59
+      мкс»: 59 мілісекунд прочитані як 59 мікросекунд;
+    * `mttr_functional_s` — якір `t_isolate` міг стояти ДО атаки, тому
+      відлік ішов не звідти; у 10 прогонах вийшло 70-127 с проти
+      медіан 51-54 с. Медіани встояли (зсув до 0.13 с), окремі значення
+      і IQR — ні;
+    * `total_response_time_s` — два відʼємні значення.
+    """
+    if t_attack is None:
+        return None
+    hits = []
+    for e in events:
+        if e.get("event_type") not in types:
+            continue
+        ts = float(e["timestamp"])
+        if ts < t_attack:
+            continue
+        if target is not None and e.get("target_uav") != target:
+            continue
+        hits.append(ts)
+    if not hits:
+        return None
+    return max(hits) if last else min(hits)
+
+
 def first_attack_detection_ts(events: list, t_attack: Optional[float],
                               target: Optional[str]) -> Optional[float]:
     """Перша security-подія, яку МОЖНА приписати атаці.
@@ -227,21 +269,16 @@ def first_attack_detection_ts(events: list, t_attack: Optional[float],
     `detected` — ні. Те саме правило вже реалізоване в
     `metrics/analyzer.py` і в `campaign_report.mttd`; тут воно приведене
     до них, щоб визначення було одне на весь код.
+
+    Тонка обгортка над `attributable_ts`, лишена окремо, бо на неї
+    посилається `analyse_run` і тести регресії.
     """
-    if t_attack is None:
-        return None
-    for e in events:
-        if e.get("event_type") != "security":
-            continue
-        if float(e["timestamp"]) < t_attack:
-            continue
-        if target is not None and e.get("target_uav") != target:
-            continue
-        return float(e["timestamp"])
-    return None
+    return attributable_ts(events, t_attack, target, ("security",))
 
 
 def _last_ts(events: list, types: tuple) -> Optional[float]:
+    """БЕЗ гейта атрибуції. Лишається тільки для діагностики; у метрики
+    не подавати — використовуй `attributable_ts(..., last=True)`."""
     ts = [float(e["timestamp"]) for e in events if e.get("event_type") in types]
     return max(ts) if ts else None
 
@@ -272,7 +309,7 @@ class DerivedMetrics:
     detected: Optional[bool]
     """Whether a SecurityEvent fired for the target on this (attack) run.
     Detection rate = mean over valid attack runs; FN rate = 1 - that."""
-    isolation_success: Optional[bool]
+    containment_success: Optional[bool]
     """Whether the incident stayed confined to the target — no non-target
     UAV left the mission plan after the attack (thesis 3.13: contained
     without uncontrolled spread)."""
@@ -291,9 +328,16 @@ def analyse_run(run_dir: str) -> Optional[DerivedMetrics]:
     target = summary.get("target_uav") or ""
 
     t_attack = _attack_ts(events)
-    t_detect = _first_ts(events, "security")
-    t_isolate = _first_ts(events, "isolation_announce")
-    t_last_rec = _last_ts(events, ("recovery_ack", "recovery_request"))
+    # Усі три — через єдиний гейт атрибуції. Раніше бралися по всьому
+    # прогону, через що передатакове хибне спрацювання ставало «першою
+    # ізоляцією» і зсувало якір MTTR у минуле, а `time_to_isolation_s`
+    # отримував викид 59 мс серед типових 50 мкс. Див. `attributable_ts`.
+    t_detect = attributable_ts(events, t_attack, target, ("security",))
+    t_isolate = attributable_ts(events, t_attack, target,
+                                ("isolation_announce",))
+    t_last_rec = attributable_ts(events, t_attack, target,
+                                 ("recovery_ack", "recovery_request"),
+                                 last=True)
 
     tti = None
     if t_detect is not None and t_isolate is not None:
@@ -373,13 +417,21 @@ def analyse_run(run_dir: str) -> Optional[DerivedMetrics]:
                 coord_restored = shares[-1]
                 residual = shares[-1]
 
-    # detection (for FN rate) and isolation success — attack runs only
+    # detection (for FN rate) and containment — attack runs only
     detected = None
-    isolation_success = None
+    containment_success = None
     if is_attack_run and t_attack is not None:
         detected = first_attack_detection_ts(events, t_attack, target) is not None
-        # Isolation succeeded if no NON-target UAV ever left the plan
-        # after the attack: the incident stayed confined to the target.
+        # СТРИМУВАННЯ (containment), а не «ізоляція спрацювала»: тут
+        # перевіряється лише те, що жоден НЕЦІЛЬОВИЙ борт не зійшов з
+        # маршруту після атаки, тобто наслідки не поширились за межі
+        # цілі. Механізм ізоляції як такий цим не вимірюється — він
+        # внутрішньопроцесний і однаковий у всіх трьох конфігураціях.
+        # Поле називалось `isolation_success` і читалось як «ізоляція
+        # вдалася», чого воно не означає. Розділ 3 визначає цю метрику
+        # саме як стримування («частка запусків, у яких інцидент було
+        # стримано без неконтрольованого поширення»), тому перейменування
+        # приводить КОД до тексту, а не навпаки.
         spread = False
         for uav, series in dev.items():
             if uav == target:
@@ -391,7 +443,7 @@ def analyse_run(run_dir: str) -> Optional[DerivedMetrics]:
         # Only meaningful when we actually observed the other UAVs.
         others = [u for u in dev if u != target]
         if others:
-            isolation_success = not spread
+            containment_success = not spread
 
     return DerivedMetrics(
         run_id=summary.get("run_id") or os.path.basename(run_dir),
@@ -409,7 +461,7 @@ def analyse_run(run_dir: str) -> Optional[DerivedMetrics]:
         total_response_time_s=trt,
         baseline_track_error_m=baseline,
         detected=detected,
-        isolation_success=isolation_success,
+        containment_success=containment_success,
     )
 
 
@@ -449,7 +501,7 @@ def _fmt_fn_rate(values: list) -> str:
 FIELDS = [
     ("detected", "Detection rate (valid attacks)", _fmt_rate),
     ("detected", "False-negative rate", _fmt_fn_rate),
-    ("isolation_success", "Isolation success rate", _fmt_rate),
+    ("containment_success", "Containment success rate", _fmt_rate),
     ("time_to_isolation_s", "Time to isolation, s", _fmt),
     ("mttr_functional_s", "MTTR functional, s", _fmt),
     ("degradation_stopped", "Recovery success rate", _fmt_rate),

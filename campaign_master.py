@@ -59,7 +59,7 @@ COLUMNS = [
     # validity
     "errored", "valid", "exclusion_reason",
     # detection / response (Table 3.13)
-    "detected", "mttd_s", "isolation_success", "time_to_isolation_s",
+    "detected", "mttd_s", "containment_success", "time_to_isolation_s",
     "mttr_functional_s", "degradation_stopped", "total_response_time_s",
     # mission resilience
     "mission_degradation_m", "stabilisation_level_m",
@@ -214,7 +214,7 @@ def build(roots: list) -> list:
                 row.update({
                     "detected": m.detected,
                     "mttd_s": mttd(run_dir),
-                    "isolation_success": m.isolation_success,
+                    "containment_success": m.containment_success,
                     "time_to_isolation_s": m.time_to_isolation_s,
                     "mttr_functional_s": m.mttr_functional_s,
                     "degradation_stopped": m.degradation_stopped,

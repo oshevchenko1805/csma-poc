@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import pytest
 
-from metrics.derived import first_attack_detection_ts
+from metrics.derived import attributable_ts, first_attack_detection_ts
 
 T_ATTACK = 1000.0
 TARGET = "uav_0"
@@ -133,6 +133,89 @@ class TestOnlyEarliestQualifying:
              "target_uav": TARGET},
         ]
         assert first_attack_detection_ts(events, T_ATTACK, TARGET) is None
+
+
+def event(kind: str, ts: float, target: str = TARGET, **kw) -> dict:
+    d = {"event_type": kind, "timestamp": ts, "target_uav": target}
+    d.update(kw)
+    return d
+
+
+class TestAttributionGateOnAllEventTimes:
+    """Той самий гейт для ізоляції та відновлення, не тільки для детекції.
+
+    Регресія на другу половину дефекту. `detected` виправили 4 серпня,
+    але `t_detect`, `t_isolate` і `t_last_rec` ще бралися по всьому
+    прогону. Наслідки на корпусі: `time_to_isolation_s` мав викид
+    59 119 мкс серед типових 52 мкс (звідси хибне «40-59 мкс» у тексті),
+    а якір MTTR міг стояти ДО атаки і давав 70-127 с проти медіан
+    51-54 с у десяти прогонах.
+    """
+
+    def test_pre_attack_isolation_is_not_the_anchor(self):
+        """Головний випадок: хибна тривога до атаки оголосила ізоляцію."""
+        events = [
+            event("security", T_ATTACK - 30.0, detector="heartbeat"),
+            event("isolation_announce", T_ATTACK - 30.0),
+            attack(),
+            event("security", T_ATTACK + 2.5),
+            event("isolation_announce", T_ATTACK + 2.5),
+        ]
+        ts = attributable_ts(events, T_ATTACK, TARGET,
+                             ("isolation_announce",))
+        assert ts == pytest.approx(T_ATTACK + 2.5)
+        # без гейта якір поїхав би на 30 с у минуле
+        assert ts - T_ATTACK >= 0.0
+
+    def test_time_to_isolation_stays_microseconds(self):
+        """Ізоляція — внутрішньопроцесна операція; різниця між виявленням
+        і оголошенням має лишатись мікросекундною, а не набирати
+        десятки мілісекунд за рахунок передатакової події."""
+        events = [
+            event("isolation_announce", T_ATTACK - 59.0),
+            attack(),
+            event("security", T_ATTACK + 1.0),
+            event("isolation_announce", T_ATTACK + 1.000052),
+        ]
+        t_det = attributable_ts(events, T_ATTACK, TARGET, ("security",))
+        t_iso = attributable_ts(events, T_ATTACK, TARGET,
+                                ("isolation_announce",))
+        assert (t_iso - t_det) == pytest.approx(52e-6, abs=1e-9)
+
+    def test_last_recovery_is_the_last_attributable_one(self):
+        events = [
+            event("recovery_ack", T_ATTACK - 10.0, action="mode_loiter"),
+            attack(),
+            event("recovery_request", T_ATTACK + 2.0, action="mode_loiter"),
+            event("recovery_ack", T_ATTACK + 7.4, action="mode_loiter"),
+        ]
+        ts = attributable_ts(events, T_ATTACK, TARGET,
+                             ("recovery_ack", "recovery_request"), last=True)
+        assert ts == pytest.approx(T_ATTACK + 7.4)
+
+    def test_total_response_time_cannot_go_negative(self):
+        """Два відʼємні `total_response_time_s` у корпусі виникли саме
+        так: відновлення після передатакової хибної тривоги, а відлік від
+        інʼєкції."""
+        events = [
+            event("recovery_ack", T_ATTACK - 31.5, action="mode_loiter"),
+            attack(),
+        ]
+        ts = attributable_ts(events, T_ATTACK, TARGET,
+                             ("recovery_ack", "recovery_request"), last=True)
+        assert ts is None
+
+    def test_events_about_another_uav_are_excluded(self):
+        events = [attack(), event("isolation_announce", T_ATTACK + 1.0,
+                                  target="uav_2")]
+        assert attributable_ts(events, T_ATTACK, TARGET,
+                               ("isolation_announce",)) is None
+
+    def test_detection_helper_delegates_to_the_same_gate(self):
+        events = [event("security", T_ATTACK - 5.0), attack(),
+                  event("security", T_ATTACK + 2.72)]
+        assert (first_attack_detection_ts(events, T_ATTACK, TARGET)
+                == attributable_ts(events, T_ATTACK, TARGET, ("security",)))
 
 
 class TestAgreesWithMttd:
