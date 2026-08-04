@@ -9,7 +9,7 @@ metrics/figures_ch4.py — єдина точка входу для набору 
 |---|---|---|
 | `fig4_1_losssweep` | межа застосовності детекції через меш | `runs_final/detection_vs_loss.csv` |
 | `fig4_2_sustain`   | плато правила підтвердження k          | `campaign_master.csv` + збережені ряди |
-| `fig4_3_tracks`    | що фізично робить відновлення          | `figdata/` — три медіанні прогони |
+| `fig4_3_tracks`    | фізичні наслідки двох атак, сітка 2 × 3          | `figdata/` — шість медіанних прогонів |
 | `fig4_4_tradeoff`  | розмен стримування × координація       | `campaign_master.csv` |
 
 **Карта режимів 5 × 3 вилучена з набору** (рецензія 4 серпня). Вона
@@ -66,7 +66,7 @@ def main() -> None:
 
     fig_loss_sweep(args.loss_csv, args.outdir)          # 4.1
     fig_sustain(rows, args.outdir)                      # 4.2
-    build_tracks(True, args.outdir, "fig4_3_tracks")    # 4.3
+    build_tracks(args.outdir, "fig4_3_tracks")          # 4.3
     fig_tradeoff(rows, args.outdir)                     # 4.4
 
     print("готово: чотири рисунки, PNG 300 dpi і PDF-вектор")

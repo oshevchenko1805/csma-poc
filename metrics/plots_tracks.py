@@ -1,28 +1,47 @@
 """
-metrics/plots_tracks.py — рис. 4.3, треки апарата: A проти C.
+metrics/plots_tracks.py — рис. 4.3, фізичні наслідки двох атак у трьох
+архітектурних конфігураціях. Сітка 2 × 3.
 
-Ґрунтова істина Gazebo (`trajectory.jsonl`), ланцюг подій
-(`merged.jsonl`), місійний маршрут (`run_summary.json`). Три прогони,
-кожен — медіанний у своїй комірці (перевірено по campaign_master.csv).
+Чому сітка, а не три панелі поспіль
+-----------------------------------
+Попередня версія ставила поруч A/GPS, C/GPS і C/injection і читалась як
+драбина «виявлення без дії → стримування → повне відновлення». Драбини
+немає: між першою і третьою панеллю одночасно змінювались атака,
+механізм виявлення і дія відновлення, тому це були три різні
+експерименти, а не три щаблі однієї шкали.
 
-Орієнтація осей: `SIM_GPS_OFF_N` зсуває ОЦІНКУ на +50 м на північ, тому
-апарат фізично йде на 50 м на південь. У даних екскурсія по `y` до
-−50.1 м, отже y = північ, x = схід. Величина збігається з
-`mission_degradation_m` = 49.84 м.
+Тепер **у межах ряду змінюється тільки архітектура**:
 
-Канонічний вихід — `fig4_3_tracks` з драбиною подій. Драбина лишена
-тому, що головне в цьому рисунку — це те, чого у A **немає**: рядок
-«дія відновлення — не застосована». Без драбини відсутність хреста
-читається лише тим, хто заздалегідь знає, що його треба шукати.
+    верхній ряд   GPS spoofing        A | B | C
+    нижній ряд    command injection   A | B | C
 
-Варіант без драбини будується прапорцем `--no-ladder` у файл
-`fig4_3_tracks_plain` і в наборі глави 4 не бере участі.
+Осі
+---
+Спільні **в межах ряду**, не на весь рисунок. GPS зносить апарат на
+південь (y до −50 м), інʼєкція — на північ (y до +68 м); спільна на всі
+шість вісь дала б розмах 126 м при 41 м по x, тобто панелі втричі вищі
+за ширину і 40 % порожнечі в кожному ряду. Наукового висновку це не
+додає: зіставляти треба A з B з C у межах однієї атаки, а між рядами
+змінюється сама атака. Масштаб по x і y всередині панелі однаковий
+завжди, інакше квадрат маршруту перестав би бути квадратом.
+
+Діапазони оголошуються в підписі — інакше різні вікна між рядами
+виглядають як маніпуляція.
+
+Вибір прогонів
+--------------
+Правило виконуване, а не записане: у кожній комірці
+`architecture × attack` береться прогін, найближчий до медіани
+`mission_degradation_m`, з детермінованим тайбрейком по `run_id`. Якщо
+мастер-файл зміниться, вибір поїде за ним або впаде з поясненням, які
+саме прогони треба довезти з VM.
 
 Запуск:  python -m metrics.plots_tracks
 """
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 
@@ -32,45 +51,101 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 
-from metrics.plots import save
+from metrics.plots import load, valid_rows, num, save
 from metrics.style import ACCENT, MUTED, apply, despine
 
-ROOT = "figdata/runs_campaign"
+FIGDATA = "figdata/runs_campaign"
+MASTER = "runs_campaign/campaign_master.csv"
 
 TARGET = "#111827"
 OTHER = "#C3C9D0"
 PLAN = "#8E979F"
 
-PANELS = [
+ARCHS = ["A", "B", "C"]
+ARCH_LABEL = {
+    "A": "A — централізована",
+    "B": "B — сегментована",
+    "C": "C — CSMA + self-healing",
+}
+
+# (атака, підпис ряду, межі y, підписи панелей за архітектурою)
+ROWS = [
     dict(
-        run="gps_pass1/run_A_gps_spoofing_r4_1785562555",
-        arch="A — централізована",
-        attack="GPS spoofing",
-        note="виявлено, дії не застосовано  ·  −49.8 м",
+        attack="gps_spoofing",
+        label="GPS spoofing",
+        ylim=(-54.0, 34.0),
+        notes={
+            "A": "атаку виявлено, коригувальну дію не застосовано;\n"
+                 "відхилення досягло межі інжектованого зміщення",
+            "B": "атаку виявлено, коригувальну дію не застосовано;\n"
+                 "відхилення досягло межі інжектованого зміщення",
+            "C": "стримування через loiter",
+        },
     ),
     dict(
-        run="std_pass1/run_C_gps_spoofing_r3_1785309732",
-        arch="C — CSMA + self-healing",
-        attack="GPS spoofing",
-        note="loiter: зупинився  ·  −19.7 м",
-    ),
-    dict(
-        run="ci_pass1/run_C_command_injection_r1_1785395502",
-        arch="C — CSMA + self-healing",
-        attack="command injection",
-        note="filter_commands: не зійшов  ·  −0.4 м",
+        attack="command_injection",
+        label="command injection",
+        ylim=(-4.0, 72.0),
+        notes={
+            "A": "атаку виявлено, стабілізація не настала\n"
+                 "протягом вікна спостереження",
+            "B": "атаку виявлено, стабілізація не настала\n"
+                 "протягом вікна спостереження",
+            "C": "блокування команди, місійний маршрут збережено",
+        },
     ),
 ]
+XLIM = (-3.0, 43.0)
+
+
+# ------------------------------------------------------------- вибір прогонів
+def select_runs(master: str = MASTER) -> dict:
+    """(arch, attack) -> (run_id, mission_degradation_m).
+
+    Найближчий до медіани комірки; тайбрейк по `run_id`, щоб вибір
+    відтворювався побайтово.
+    """
+    rows = valid_rows(load(master))
+    out = {}
+    for row in ROWS:
+        attack = row["attack"]
+        for arch in ARCHS:
+            sel = [(r["run_id"], num(r, "mission_degradation_m"))
+                   for r in rows
+                   if r["attack"] == attack and r["architecture"] == arch]
+            sel = [(rid, d) for rid, d in sel if d is not None]
+            if not sel:
+                continue
+            vals = sorted(d for _, d in sel)
+            n = len(vals)
+            med = (vals[n // 2] if n % 2
+                   else (vals[n // 2 - 1] + vals[n // 2]) / 2.0)
+            rid, dev = min(sel, key=lambda p: (abs(p[1] - med), p[0]))
+            out[(arch, attack)] = (rid, dev)
+    return out
+
+
+def run_dir(run_id: str) -> str:
+    hits = glob.glob(os.path.join(FIGDATA, "*", "run_" + run_id))
+    if not hits:
+        raise SystemExit(
+            "немає даних треку для %s.\n"
+            "Довезти з VM:\n"
+            "  cd ~/csma_poc_v2 && d=$(find runs_campaign -maxdepth 2 "
+            "-type d -name 'run_%s')\n"
+            "  mkdir -p figdata && tar czf - $d/trajectory.jsonl "
+            "$d/run_summary.json $d/merged.jsonl | tar xzf - -C figdata"
+            % (run_id, run_id))
+    return hits[0]
 
 
 # ---------------------------------------------------------------- завантаження
-def load_run(rel: str) -> dict:
-    d = os.path.join(ROOT, rel)
+def load_run(rid: str) -> dict:
+    d = run_dir(rid)
     traj: dict[str, list] = {}
     for line in open(os.path.join(d, "trajectory.jsonl")):
         r = json.loads(line)
-        traj.setdefault(r["uav_id"], []).append(
-            (r["t_wall"], r["x"], r["y"]))
+        traj.setdefault(r["uav_id"], []).append((r["t_wall"], r["x"], r["y"]))
     for u in traj:
         traj[u].sort()
     events = [json.loads(l) for l in open(os.path.join(d, "merged.jsonl"))]
@@ -88,58 +163,41 @@ def plan_square(summary: dict):
     return east + [east[0]], north + [north[0]]
 
 
-def milestones(events: list) -> dict:
-    """inject / detect / recovery на шкалі t_wall."""
+def milestones(events: list, target: str) -> dict:
+    """inject / detect / recovery, з тим самим гейтом, що й `detected`:
+    подія після інʼєкції і про атакований борт."""
     out: dict = {}
+    t0 = None
     for e in events:
-        et = e.get("event_type")
-        if et == "attack" and e.get("phase") == "inject_start":
-            out.setdefault("inject", e["timestamp"])
-        elif et == "security":
-            out.setdefault("detect", e["timestamp"])
-            out.setdefault("detector", e.get("detector"))
-        elif et == "isolation_announce":
-            out.setdefault("isolate", e["timestamp"])
-        elif et == "recovery_ack":
-            out.setdefault("recovery", e["timestamp"])
-            out.setdefault("action", e.get("action"))
-    # підтвердження через меш, якщо воно є
-    for e in events:
-        if e.get("event_type") == "security" and e.get("detector") == "cross_check":
-            out.setdefault("mesh", e["timestamp"])
+        if (e.get("event_type") == "attack"
+                and e.get("phase") == "inject_start"):
+            t0 = float(e["timestamp"])
+            out["inject"] = t0
             break
+    if t0 is None:
+        return out
+    for e in events:
+        ts = float(e["timestamp"])
+        if ts < t0 or e.get("target_uav") not in (None, target):
+            continue
+        et = e.get("event_type")
+        if et == "security":
+            out.setdefault("detect", ts)
+        elif et == "recovery_ack":
+            out.setdefault("recovery", ts)
+            out.setdefault("action", e.get("action"))
     return out
 
 
 def at_time(track: list, t: float):
-    """Найближча вибірка треку до моменту t."""
     arr = np.array([p[0] for p in track])
     i = int(np.argmin(np.abs(arr - t)))
     return track[i][1], track[i][2]
 
 
-def ladder_lines(ms: dict) -> list[tuple[str, str]]:
-    t0 = ms["inject"]
-    rows = [("інʼєкція", "+0.00 с")]
-    if "detect" in ms:
-        rows.append((f"виявлення · {ms.get('detector', '')}",
-                     "+%.2f с" % (ms["detect"] - t0)))
-    if "isolate" in ms:
-        rows.append(("ізоляція оголошена", "+%.2f с" % (ms["isolate"] - t0)))
-    if "recovery" in ms:
-        rows.append((f"дія · {ms.get('action', '')}",
-                     "+%.2f с" % (ms["recovery"] - t0)))
-    else:
-        rows.append(("дія відновлення", "не застосована"))
-    if "mesh" in ms:
-        rows.append(("підтвердження через меш",
-                     "+%.2f с" % (ms["mesh"] - t0)))
-    return rows
-
-
-# ---------------------------------------------------------------- побудова
-def draw_panel(ax, spec, xlim, ylim):
-    run = load_run(spec["run"])
+# -------------------------------------------------------------------- панель
+def draw_panel(ax, rid: str, dev: float, ylim, note: str):
+    run = load_run(rid)
     tgt = run["target"]
 
     sq = plan_square(run["summary"])
@@ -150,99 +208,124 @@ def draw_panel(ax, spec, xlim, ylim):
         if uav == tgt:
             continue
         ax.plot([p[1] for p in track], [p[2] for p in track],
-                color=OTHER, lw=1.4, zorder=2, solid_capstyle="round")
+                color=OTHER, lw=1.3, zorder=2, solid_capstyle="round")
 
     t = run["traj"][tgt]
     ax.plot([p[1] for p in t], [p[2] for p in t],
-            color=TARGET, lw=1.7, zorder=4, solid_capstyle="round")
+            color=TARGET, lw=1.6, zorder=4, solid_capstyle="round")
 
-    ms = milestones(run["events"])
-    if "inject" in ms:
-        x, y = at_time(t, ms["inject"])
-        ax.plot(x, y, "o", ms=9, mfc="white", mec=ACCENT, mew=1.9, zorder=6)
-    # Коли виявлення і дія збігаються в часі (0.01 с), маркери лягають один
-    # на одного. Тоді темне кільце навколо хреста читається як «обидві
-    # події тут», і це чесніше, ніж зсувати маркер від його точки на треку.
+    ms = milestones(run["events"], tgt)
+    # Виявлення і дія розділені сотими долями секунди, тому лягають в
+    # одну точку треку. Темне кільце навколо хреста чесніше, ніж рознести
+    # маркери штучно.
     coincide = ("recovery" in ms and "detect" in ms
                 and abs(ms["recovery"] - ms["detect"]) < 0.5)
+    if "inject" in ms:
+        x, y = at_time(t, ms["inject"])
+        ax.plot(x, y, "o", ms=8, mfc="white", mec=ACCENT, mew=1.8, zorder=6)
     if "detect" in ms:
         x, y = at_time(t, ms["detect"])
-        ax.plot(x, y, "o", ms=13 if coincide else 8,
+        ax.plot(x, y, "o", ms=12 if coincide else 7,
                 mfc=TARGET, mec="white", mew=1.0, zorder=6)
     if "recovery" in ms:
         x, y = at_time(t, ms["recovery"])
-        ax.plot(x, y, "X", ms=8 if coincide else 11,
+        ax.plot(x, y, "X", ms=8 if coincide else 10,
                 mfc=ACCENT, mec="white", mew=1.0, zorder=7)
 
-    ax.set_xlim(*xlim)
+    ax.set_xlim(*XLIM)
     ax.set_ylim(*ylim)
     ax.set_aspect("equal", adjustable="box")
-    ax.text(0.0, 1.085, spec["arch"], transform=ax.transAxes,
-            fontsize=9.6, fontweight="bold", color="#111827",
-            ha="left", va="bottom")
-    ax.text(0.0, 1.043, spec["attack"], transform=ax.transAxes,
-            fontsize=9.0, color="#374151", ha="left", va="bottom")
-    ax.text(0.0, 1.005, spec["note"], transform=ax.transAxes,
-            fontsize=8.4, color=MUTED, style="italic", ha="left", va="bottom")
     despine(ax)
-    return ms
+    return dev, note
 
 
-def legend_handles(with_recovery=True):
-    h = [
-        Line2D([], [], color=TARGET, lw=1.7, label="атакований апарат"),
-        Line2D([], [], color=OTHER, lw=1.7, label="два інші апарати"),
+def legend_handles():
+    return [
+        Line2D([], [], color=TARGET, lw=1.6, label="атакований апарат"),
+        Line2D([], [], color=OTHER, lw=1.6, label="два інші апарати"),
         Line2D([], [], color=PLAN, lw=1.0, ls=(0, (5, 3)),
                label="місійний маршрут"),
         Line2D([], [], marker="o", ls="none", ms=8, mfc="white", mec=ACCENT,
-               mew=1.9, label="інʼєкція"),
-        Line2D([], [], marker="o", ls="none", ms=7.5, mfc=TARGET, mec="white",
+               mew=1.8, label="інʼєкція"),
+        Line2D([], [], marker="o", ls="none", ms=7, mfc=TARGET, mec="white",
                label="виявлення"),
+        Line2D([], [], marker="X", ls="none", ms=9, mfc=ACCENT, mec="white",
+               label="дія відновлення"),
     ]
-    if with_recovery:
-        h.append(Line2D([], [], marker="X", ls="none", ms=10, mfc=ACCENT,
-                        mec="white", label="дія відновлення"))
-    return h
 
 
-def build(with_ladder: bool, outdir: str, name: str):
+def build(outdir: str = "figures", name: str = "fig4_3_tracks"):
     apply()
-    xlim, ylim = (-4, 42), (-56, 36)
-    figsize = (13.5, 8.6) if with_ladder else (13.5, 7.2)
-    fig, axes = plt.subplots(1, 3, figsize=figsize)
-    fig.subplots_adjust(left=0.055, right=0.985, top=0.815,
-                        bottom=0.30 if with_ladder else 0.175, wspace=0.16)
+    picks = select_runs()
 
-    for ax, spec in zip(axes, PANELS):
-        ms = draw_panel(ax, spec, xlim, ylim)
-        ax.set_xlabel("Схід, м")
-        if with_ladder:
-            y = -0.135
-            for label, val in ladder_lines(ms):
-                miss = val.startswith("не")
-                col = "#8C1D18" if miss else "#374151"
-                ax.text(0.0, y, label, transform=ax.transAxes, fontsize=8.0,
-                        color=col, ha="left", va="top")
-                ax.text(1.0, y, val, transform=ax.transAxes, fontsize=8.0,
-                        color=col, ha="right", va="top",
-                        fontweight="bold" if miss else "normal")
-                y -= 0.052
-    axes[0].set_ylabel("Північ, м")
-    for ax in axes[1:]:
-        ax.tick_params(labelleft=False)
+    spans = [r["ylim"][1] - r["ylim"][0] for r in ROWS]
+    fig, axes = plt.subplots(2, 3, figsize=(12.6, 14.0),
+                             gridspec_kw={"height_ratios": spans})
+    fig.subplots_adjust(left=0.105, right=0.985, top=0.900, bottom=0.235,
+                        wspace=0.10, hspace=0.40)
 
-    fig.legend(handles=legend_handles(), loc="lower center",
-               ncol=6, bbox_to_anchor=(0.5, 0.015 if with_ladder else 0.02),
-               fontsize=8.6)
+    for i, row in enumerate(ROWS):
+        for j, arch in enumerate(ARCHS):
+            ax = axes[i][j]
+            rid, dev = picks[(arch, row["attack"])]
+            draw_panel(ax, rid, dev, row["ylim"], row["notes"][arch])
+            ax.set_xlabel("Схід, м", labelpad=2)
+            if j == 0:
+                ax.set_ylabel("Північ, м")
+            else:
+                ax.tick_params(labelleft=False)
 
-    fig.suptitle("Що фізично робить відновлення: виявлення без дії, "
-                 "стримування, і повне відновлення",
-                 fontsize=12.6, fontweight="bold", x=0.055, ha="left", y=0.975)
-    fig.text(0.055, 0.938,
-             "Ґрунтова істина Gazebo, ~5 Гц. Прогони — медіанні у своїх "
-             "комірках. Осі спільні: екскурсії −50, −20 і 0 м зіставні "
-             "безпосередньо.",
-             fontsize=8.5, color=MUTED, ha="left")
+    # Позиції підписів беремо з РЕАЛЬНИХ боксів осей, а не з відносних
+    # координат панелі. При aspect="equal" matplotlib стискає бокс під
+    # квадратний масштаб, і два ряди різної висоти дають різну абсолютну
+    # відстань для того самого відносного зсуву — через це підписи
+    # налазили одна на одну.
+    fig.canvas.draw()
+    for i, row in enumerate(ROWS):
+        boxes = [axes[i][j].get_position() for j in range(len(ARCHS))]
+        for j, arch in enumerate(ARCHS):
+            _, dev = picks[(arch, row["attack"])]
+            b = boxes[j]
+            cx = b.x0 + b.width / 2.0
+            if i == 0:
+                fig.text(cx, b.y1 + 0.008, ARCH_LABEL[arch], fontsize=10.5,
+                         fontweight="bold", ha="center", va="bottom",
+                         color="#111827")
+            fig.text(cx, b.y0 - 0.032, "відхилення від місії %.1f м" % dev,
+                     fontsize=9.0, fontweight="bold", ha="center", va="top",
+                     color="#111827")
+            fig.text(cx, b.y0 - 0.049, row["notes"][arch], fontsize=8.2,
+                     ha="center", va="top", color=MUTED, linespacing=1.6)
+
+        fig.text(boxes[0].x0 - 0.072,
+                 (boxes[0].y0 + boxes[0].y1) / 2.0,
+                 "%s\ny ∈ [%+.0f; %+.0f] м"
+                 % (row["label"], row["ylim"][0], row["ylim"][1]),
+                 fontsize=10.5, fontweight="bold", rotation=90,
+                 ha="center", va="center", color="#111827", linespacing=1.9)
+
+    fig.legend(handles=legend_handles(), loc="lower center", ncol=6,
+               bbox_to_anchor=(0.5, 0.092), fontsize=8.8)
+
+    fig.suptitle("Фізичні наслідки GPS spoofing та command injection "
+                 "у трьох архітектурних конфігураціях",
+                 fontsize=12.8, fontweight="bold", x=0.075, ha="left",
+                 y=0.972)
+    fig.text(0.075, 0.940,
+             "Ґрунтова істина Gazebo, ~5 Гц. У кожній комірці показано "
+             "прогін, найближчий до медіани відхилення від місії "
+             "в цій комірці.",
+             fontsize=8.6, color=MUTED, ha="left")
+
+    fig.text(0.075, 0.055,
+             "У межах кожного ряду використано спільні осі; між рядами "
+             "масштаби можуть відрізнятися, оскільки порівнюються різні "
+             "типи атак. Масштаб по x і y всередині\n"
+             "кожної панелі однаковий. Прогони не є парними реалізаціями "
+             "зі спільним seed, тому рисунок ілюструє механізм, а не "
+             "доводить причинність. MTTD між рядами\nне зіставляється.",
+             fontsize=8.2, color=MUTED, ha="left", va="top", linespacing=1.7)
+
     save(fig, outdir, name)
 
 
@@ -250,13 +333,8 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--outdir", default="figures")
-    ap.add_argument("--no-ladder", action="store_true",
-                    help="побудувати варіант без драбини подій")
     args = ap.parse_args()
-    if args.no_ladder:
-        build(False, args.outdir, "fig4_3_tracks_plain")
-    else:
-        build(True, args.outdir, "fig4_3_tracks")
+    build(args.outdir)
 
 
 if __name__ == "__main__":
