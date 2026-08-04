@@ -504,7 +504,7 @@ def fig_sustain(rows: list, outdir: str, ks=(1, 2, 3, 4, 5, 6)) -> None:
     fps = [sum(1 for v in clean if v >= k) / len(clean) for k in ks]
 
     style.apply()
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.8, 5.3), sharex=True,
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(7.2, 5.4), sharex=True,
                                    gridspec_kw={"height_ratios": [1.35, 1]})
 
     for ax in (ax1, ax2):
@@ -514,7 +514,18 @@ def fig_sustain(rows: list, outdir: str, ks=(1, 2, 3, 4, 5, 6)) -> None:
 
     ax1.plot(ks, det, "o-", color=style.COLOR["C"], markersize=6,
              linewidth=1.8)
-    ax1.set_ylabel("Частка виявлених атак\n(gps_spoofing, n=%d)" % len(attack))
+    # НЕ «частка виявлених атак»: тут не рахуються реальні події
+    # детектора. Береться збережений ряд `pos_horiz_ratio` і питається,
+    # чи задовольнив би він поріг k. Це sensitivity analysis локального
+    # GPS-детектора, а не Detection Rate архітектури — плутати їх не
+    # можна, бо архітектурна детекція в C йде ще й через cross_check.
+    # Опис кожної панелі — горизонтальним заголовком, а не поверненим
+    # на 90° підписом осі. Повернутий текст не вміщався у висоту панелі
+    # й налазив на підпис сусідньої; горизонтально місця вистачає, і
+    # читається він швидше.
+    ax1.set_title("Частка прогонів, у яких сигнал GPS-детектора долає "
+                  "поріг k   (n=%d, gps_spoofing)" % len(attack),
+                  loc="left", fontsize=8.6, color="#374151", pad=6)
     ax1.set_ylim(0.62, 1.10)
     for k, d in zip(ks, det):
         ax1.annotate("%.2f" % d, (k, d), textcoords="offset points",
@@ -525,8 +536,9 @@ def fig_sustain(rows: list, outdir: str, ks=(1, 2, 3, 4, 5, 6)) -> None:
 
     ax2.plot(ks, fps, "s-", color=style.COLOR["B"], markersize=6,
              linewidth=1.8)
-    ax2.set_ylabel("Частка чистих прогонів\nіз хибним спрацюванням (n=%d)"
-                   % len(clean))
+    ax2.set_title("Частка чистих прогонів із хибним спрацюванням   "
+                  "(n=%d)" % len(clean),
+                  loc="left", fontsize=8.6, color="#374151", pad=6)
     ax2.set_ylim(0, 0.075)
     for k, f in zip(ks, fps):
         ax2.annotate("%.3f" % f, (k, f), textcoords="offset points",
@@ -537,9 +549,15 @@ def fig_sustain(rows: list, outdir: str, ks=(1, 2, 3, 4, 5, 6)) -> None:
     for ax in (ax1, ax2):
         style.despine(ax)
 
-    ax1.set_title("Плато k = 2…4: вибір правила підтвердження захищений з "
-                  "обох боків\n(менші k множать хибні тривоги, більші "
-                  "втрачають атаки)", fontsize=9.5)
+    fig.suptitle("Плато k = 2…4: вибір правила підтвердження захищений з "
+                 "обох боків\n(менші k множать хибні тривоги, більші "
+                 "втрачають атаки)", fontsize=10, y=0.995)
+    fig.text(0.012, 0.052,
+             "Це чутливість ЛОКАЛЬНОГО GPS-детектора, перерахована офлайн "
+             "із збережених рядів pos_horiz_ratio, а не Detection Rate "
+             "архітектури:\nв архітектурі C виявлення йде ще й через "
+             "cross_check, якого це правило не стосується.",
+             fontsize=7.4, color=style.MUTED, ha="left", va="bottom")
     # Вікна названі явно: у верхній панелі — пост-атакове (на чистому
     # прогоні атаки немає, тому там береться вся серія). Без цього рядка
     # два знаменники читаються як одне правило, а це різні правила.
@@ -549,8 +567,7 @@ def fig_sustain(rows: list, outdir: str, ks=(1, 2, 3, 4, 5, 6)) -> None:
              "(атаки немає, тому пост-атакового вікна теж немає)."
              % (len(attack), len(clean)),
              fontsize=7.4, color=style.MUTED, ha="left", va="bottom")
-    fig.subplots_adjust(bottom=0.175)
-    fig.align_ylabels([ax1, ax2])
+    fig.subplots_adjust(bottom=0.20, top=0.86, hspace=0.30)
     save(fig, outdir, "fig4_2_sustain")
 
 

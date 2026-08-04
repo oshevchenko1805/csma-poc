@@ -186,11 +186,19 @@ def fig_loss_sweep(loss_csv: str, outdir: str) -> None:
                 color=style.COLOR["C"], ecolor=style.COLOR["B"], capsize=3,
                 linewidth=1.6,
                 label="C — виявлення через mesh (cross_check)")
-    ax.axhline(0.0, color=style.EDGE["A"], linestyle="--", linewidth=1.0)
-    # Підпис A і B ставимо ліворуч від останньої точки: праворуч він
-    # упирався в рамку і обрізався.
-    ax.text(0.02, 0.035, "A, B — без mesh, виявлення відсутнє",
-            fontsize=7.8, ha="left", va="bottom", color=style.EDGE["A"])
+    # Нульова лінія A і B НЕ є результатом цього свипу: у
+    # `detection_vs_loss.csv` виміряна тільки архітектура C. Раніше тут
+    # стояв підпис «A, B — без mesh, виявлення відсутнє», який читався
+    # як виміряна на цьому графіку величина. Насправді нуль береться з
+    # кампанії (0/28 і 0/30 під detector_takeout, вже після виправлення
+    # гейта детекції), тобто з іншого експерименту, і підпис має це
+    # називати. Лінію лишаємо як опорну, але не як дані свипу.
+    ax.axhline(0.0, color=style.EDGE["A"], linestyle=":", linewidth=1.0)
+    ax.text(0.02, 0.035,
+            "A і B у цьому свипі не оцінювались: резервного mesh-каналу\n"
+            "в них немає за побудовою. У кампанії — 0/28 і 0/30.",
+            fontsize=7.4, ha="left", va="bottom", color=style.EDGE["A"],
+            linespacing=1.5)
 
     for x, y, n in zip(xs, ys, ns):
         ax.annotate("n=%d" % n, (x, y), textcoords="offset points",
