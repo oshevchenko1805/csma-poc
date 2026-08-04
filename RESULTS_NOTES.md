@@ -1212,7 +1212,59 @@ pre-attack windows of attack runs, and both are the cascades (8 and 5
 events). So the blast-radius claim rests on two observations in a
 different exposure class from A's and B's baseline events. Say so.
 
-### 19.4 Blast radius, now measured rather than named
+### 19.4 There is no blast radius. There is loop depth.
+
+**This overturns the mechanism behind conclusion 4, and R13 as written is
+wrong twice.** Counted symmetrically across the largest false-positive
+cascade in each architecture:
+
+| | A `none_r2` | B `none_r3` | C `gps_r4` | C `inj_r1` |
+|---|---|---|---|---|
+| security events | 3 | 3 | 8 | 5 |
+| **vehicles accused** | **3** | **3** | **1** | **1** |
+| monitors reporting | 3 of 3 | 3 of 3 | 3 of 3 | 3 of 3 |
+| detectors | heartbeat 3 | heartbeat 3 | cross_check 6, gps 2 | cross_check 4, gps 1 |
+| isolation announcements | 3 | 3 | 7 | 5 |
+| **recovery actions executed** | **0** | **0** | **4** | **3** |
+
+R13 currently says the false alarm *"stays where it fired in A and B
+(1-3 events), while in C it spreads across the mesh and becomes a
+swarm-level event"*. Both halves fail:
+
+1. **In A and B it does not stay put.** A fleet-wide heartbeat glitch
+   fires three monitors within 0.03 s, each flagging **its own** vehicle.
+   Three accusations, three isolations. Simultaneous, not propagating.
+2. **In C it does not become swarm-level in victims.** One vehicle is
+   accused and stays the only one accused. **By breadth of accusation C
+   is narrower than A and B, not wider.**
+
+What actually separates them is **depth**. In C the sequence runs
+gps detection at t=0, both neighbours confirming by `cross_check` at
++5.14 s, the cycle repeating at +11.13 s — and a recovery action
+**executed** each time. In A and B the alarm terminates at isolation and
+nothing is ever executed.
+
+**Correct statement:** *in A and B a false alarm ends at isolation; in C
+it completes the loop and an action is carried out on a healthy vehicle.
+The price of closing the loop is that it closes on false positives too.*
+
+This is the same principle as every other result in the work — the
+contribution is the closed cycle, and the cost is charged symmetrically —
+so it reads as a coherent finding rather than an isolated penalty.
+
+**Retire the term "blast radius".** Table 3.14 introduced *False Positive
+Blast Radius* before the data existed; the data says there is no radius
+to measure. Report **глибину циклу**: чи доходить хибна тривога до
+виконання дії. Keep the pre-registration visible — a metric declared in
+advance and then found to measure the wrong thing is a stronger disclosure
+than one quietly dropped.
+
+**Caveats.** One run per architecture. Both C runs are pre-attack windows
+of attack runs; the A and B runs are clean flights. On 35 clean flights C
+produced zero false positives at all (R19.3). Seventeen FP runs exist in
+total and only four were examined here.
+
+### 19.4-b Supporting counts (superseded framing kept for provenance)
 
 8 and 5 were **event counts**. Recounted from `merged.jsonl` of both C
 runs (now versioned in `figdata/`), and the answer is sharper than the
