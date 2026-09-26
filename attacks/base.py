@@ -137,6 +137,12 @@ class AttackInjector(ABC):
     async def cleanup(self) -> None:
         """Tear everything down. Must be idempotent."""
 
+    def injection_evidence(self) -> dict:
+        """Machine-checkable proof that the injection was technically
+        executed (review stage 3 inclusion rule). Read after cleanup().
+        Empty dict = this injector records none — NOT "not injected"."""
+        return {}
+
 
 class NullAttackInjector(AttackInjector):
     """No-op injector for baseline (no-attack) runs.

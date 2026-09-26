@@ -45,6 +45,15 @@ pre-attack value and cleanup() writes it back. If the read fails, we
 fall back to `restore_value` (default 0.0 — the patched OFF_N default),
 so a transient read error can't strand a non-zero offset.
 
+Injection evidence (review stage 3)
+-----------------------------------
+cleanup() reads the param back BEFORE restoring it (value held at the
+end of the observation window) and once more AFTER restoring it. The
+first read proves the offset was in PX4 for the whole window; the second
+proves nothing leaks into the next run. Deliberately not read in fire():
+an extra round trip there would delay the inject_start marker and make
+timings incomparable with the thesis-campaign-v1 runs.
+
 Why this approach
 -----------------
 The dissertation evaluates the detection/recovery pipeline, not RF GPS
@@ -102,6 +111,9 @@ class GpsSpoofingInjector(AttackInjector):
         self._armed: bool = False
         self._fired: bool = False
         self._original_value: Optional[float] = None
+        self._readback_end: Optional[float] = None
+        self._readback_restored: Optional[float] = None
+        self._readback_error: Optional[str] = None
 
     @property
     def name(self) -> str:
@@ -160,8 +172,50 @@ class GpsSpoofingInjector(AttackInjector):
             else self.DEFAULT_RESTORE_VALUE
         )
         try:
+            self._readback_end = await self._param_writer.get_param_float(
+                self._param_name
+            )
+        except Exception as exc:
+            self._readback_error = f"end: {exc}"
+        try:
             await self._param_writer.set_param_float(
                 self._param_name, restore_to
             )
         except Exception:
             pass
+        try:
+            self._readback_restored = await self._param_writer.get_param_float(
+                self._param_name
+            )
+        except Exception as exc:
+            self._readback_error = (
+                (self._readback_error + "; " if self._readback_error else "")
+                + f"restored: {exc}"
+            )
+
+    READBACK_TOL: float = 1e-3
+
+    def injection_evidence(self) -> dict:
+        """{'gps_spoofing': {...}}. injection_confirmed is True only when
+        the param read back at window end equals the spoofed value; None
+        when it could not be read (unknown, not False)."""
+        if not self._fired:
+            confirmed: Optional[bool] = False
+        elif self._readback_end is None:
+            confirmed = None
+        else:
+            confirmed = (
+                abs(self._readback_end - self._spoofed_value) <= self.READBACK_TOL
+            )
+        return {
+            "gps_spoofing": {
+                "param": self._param_name,
+                "fired": self._fired,
+                "spoofed_value": self._spoofed_value,
+                "original_value": self._original_value,
+                "readback_end_of_window": self._readback_end,
+                "readback_after_restore": self._readback_restored,
+                "readback_error": self._readback_error,
+                "injection_confirmed": confirmed,
+            }
+        }

@@ -98,6 +98,13 @@ class SequentialAttackInjector(AttackInjector):
             await child.fire()
         self._fired = True
 
+    def injection_evidence(self) -> dict:
+        """Children's evidence merged, keyed by child name."""
+        out: dict = {}
+        for child in self._children:
+            out.update(child.injection_evidence())
+        return out
+
     async def cleanup(self) -> None:
         # Reverse order, best-effort. The last-fired child (e.g. the
         # param-restoring gps_spoofing) is cleaned first, while the

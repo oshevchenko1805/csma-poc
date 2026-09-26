@@ -147,6 +147,10 @@ class RunResult:
     recorded per run so the curve never depends on folder naming. On
     A/B (mesh disabled) loss_prob is 0.0 by construction.
     """
+    attack_evidence: Optional[dict[str, Any]] = None
+    """Injector-reported proof the attack was technically executed
+    (review stage 3 inclusion rule), e.g. gps_spoofing param read back
+    at window end. {} = injector records none; None = not collected."""
     flight_modes: Optional[dict[str, Any]] = None
     """Flight-mode timeline per UAV, [{t_wall, mode}] on mode changes
     (review stage 3a-3). Shows whether a response mode (HOLD, OFFBOARD)
@@ -671,6 +675,11 @@ class ExperimentRunner:
             "loss_seed": self._arch_cfg.mesh.loss_seed,
             "delay_sec": self._arch_cfg.mesh.delay_sec,
         }
+        attack_evidence: Optional[dict[str, Any]] = None
+        try:
+            attack_evidence = self._attack_injector.injection_evidence()
+        except Exception as exc:
+            error = error or f"attack_evidence: {exc}"
         flight_modes: Optional[dict[str, Any]] = None
         if self._mission_runner is not None and hasattr(
             self._mission_runner, "flight_modes"
@@ -706,6 +715,7 @@ class ExperimentRunner:
             mesh_settings=mesh_settings,
             recovery_settings=recovery_settings,
             flight_modes=flight_modes,
+            attack_evidence=attack_evidence,
             error=error,
         )
 
