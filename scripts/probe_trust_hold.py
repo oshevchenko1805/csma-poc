@@ -185,14 +185,22 @@ async def fly(args, out: Path) -> dict:
 
 def fallback_mode(out: Path, meta: dict) -> str | None:
     """First mode other than the expected one inside the window after the
-    action reached the expected mode. None if the action held."""
+    action reached the expected mode. None if the action held.
+
+    modes.jsonl logs changes only, so the mode already in effect at
+    t_action counts (loiter: PX4 is in HOLD after takeoff already)."""
     exp = EXPECTED_MODE[meta["action"]]
     if meta.get("t_action") is None or not (out / "modes.jsonl").exists():
         return None
     t_end = meta["t_inject"] + meta["window_s"]
-    seen = False
-    for r in read_jsonl(str(out / "modes.jsonl")):
-        if r["t_wall"] < meta["t_action"] or r["t_wall"] > t_end:
+    recs = sorted(read_jsonl(str(out / "modes.jsonl")), key=lambda r: r["t_wall"])
+    at_action = None
+    for r in recs:
+        if r["t_wall"] <= meta["t_action"]:
+            at_action = r["mode"]
+    seen = at_action == exp
+    for r in recs:
+        if r["t_wall"] <= meta["t_action"] or r["t_wall"] > t_end:
             continue
         if r["mode"] == exp:
             seen = True
