@@ -84,3 +84,39 @@ Raw: VM ~/probe_runs/<run>.
   any pipeline pilot run: the earlier prediction "no difference in DT" is
   WITHDRAWN. DT is reported as a mechanism check — difference of medians
   with CI, no directional or equivalence claim.
+
+## Results — Part B (2026-09-26, pipeline, runs_pilot3b, commit 8d14fb8)
+
+| run | policy | action (acks) | modes after inject | drift | jump | evidence |
+|-----|--------|---------------|--------------------|-------|------|----------|
+| B1 GPS | trust_aware | hold_zero_velocity ×2 ok | OFFBOARD +3.9 s, held | 9.28 m | 7.58 s | confirmed |
+| B2 MT+GPS | trust_aware | hold_zero_velocity ×2 ok | OFFBOARD +4.0 s, held | 1.14 m | 7.45 s | confirmed |
+| B3 DT+GPS | trust_aware | hold_zero_velocity ok | OFFBOARD +8.2 s, held | 3.28 m | 7.36 s | confirmed |
+| B4 GPS | proportionate | mode_loiter ×2 ok | HOLD +3.9 s | 50.10 m | 7.80 s | confirmed |
+| B5 GPS | detect_only | none | no change (MISSION) | — | 7.97 s | confirmed |
+
+**Technical GO** (rule above): B1–B3 acknowledged, OFFBOARD held to window
+end; B4 > 40 m; B5 no action.
+
+**B1 decomposition.** Distance from the action point stayed ≤ 1.9 m for
+the first 30 s (the estimate jump at +7.6 s and the second request on it
+had no visible effect). At +33.1 s uav_2, still flying its own square in
+the same 20 m layer, passed at a 3D distance of **0.39 m** (world frame,
+uav_0 z 20.35 m, uav_2 z 19.99 m) — a collision in SITL — and uav_0 was
+displaced to ~9 m. B2: closest peer 2.5 m, no displacement. The three
+squares are 30×30 m, offset only 5/10 m east, so a vehicle that STOPS on
+its route lies on its peers' routes.
+
+## Decision after the pilot (2026-09-26, before H2 is fixed)
+
+- The action is NOT changed. B = 7.91 m and the primary metric
+  (post_response_drift_m, all causes) are NOT changed. Drift caused by a
+  peer collision is an outcome of the policy (ITT rule above); if H2
+  misses the bound in a cell because of collisions, that is reported.
+- New **secondary, descriptive** swarm-safety metric, all arms, defined
+  in metrics/peer_separation.py before the campaign: min 3D separation
+  from the target to any peer over [t_inject, t_inject + 60 s], number of
+  contacts (< 1.0 m) and near misses (< 3.0 m). Truth (Gazebo world)
+  frame. No hypothesis is tested on it.
+- Altitude deconfliction (stop + climb out of the formation layer) is a
+  separate, later arm — not mixed into H2.
