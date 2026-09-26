@@ -49,6 +49,12 @@ VALID_COORDINATOR_ELECTIONS: frozenset[str] = frozenset(
     {"lowest_alive_sysid", "none"}
 )
 VALID_MISSION_TYPES: frozenset[str] = frozenset({"coordinated_waypoint"})
+# Must equal decision.recovery.POLICY_TABLES keys (guarded by a test;
+# not imported from there to keep core free of domain imports).
+VALID_RECOVERY_POLICIES: frozenset[str] = frozenset(
+    {"proportionate", "trust_aware", "detect_only"}
+)
+DEFAULT_RECOVERY_POLICY: str = "proportionate"
 
 
 class ConfigError(ValueError):
@@ -104,6 +110,8 @@ class MeshConfig:
 class RecoveryConfig:
     enabled: bool
     coordinator_election: str
+    # Optional in YAML; absent == the historical table (review stage 3).
+    policy: str = DEFAULT_RECOVERY_POLICY
 
 
 @dataclass(frozen=True)
@@ -295,13 +303,18 @@ def _parse_mesh(raw: dict[str, Any]) -> MeshConfig:
 def _parse_recovery(raw: dict[str, Any]) -> RecoveryConfig:
     ctx = "recovery"
     _require_keys(raw, {"enabled", "coordinator_election"}, ctx)
-    _no_extra_keys(raw, {"enabled", "coordinator_election"}, ctx)
+    _no_extra_keys(raw, {"enabled", "coordinator_election", "policy"}, ctx)
     return RecoveryConfig(
         enabled=bool(raw["enabled"]),
         coordinator_election=_enum(
             str(raw["coordinator_election"]),
             VALID_COORDINATOR_ELECTIONS,
             f"{ctx}.coordinator_election",
+        ),
+        policy=_enum(
+            str(raw.get("policy", DEFAULT_RECOVERY_POLICY)),
+            VALID_RECOVERY_POLICIES,
+            f"{ctx}.policy",
         ),
     )
 
@@ -336,6 +349,15 @@ def _validate_architecture_invariants(cfg: ArchitectureConfig) -> None:
         raise ConfigError("architecture C requires mesh.enabled=true")
     if cfg.architecture == "C" and not cfg.recovery.enabled:
         raise ConfigError("architecture C requires recovery.enabled=true")
+
+    if (
+        cfg.recovery.policy != DEFAULT_RECOVERY_POLICY
+        and not cfg.recovery.enabled
+    ):
+        raise ConfigError(
+            f"recovery.policy={cfg.recovery.policy!r} requires "
+            f"recovery.enabled=true"
+        )
 
     if cfg.mesh.enabled and cfg.mesh.transport != "zeromq":
         raise ConfigError(

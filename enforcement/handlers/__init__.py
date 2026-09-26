@@ -13,6 +13,10 @@ from enforcement.handlers.restart import (
     ProcessSpec,
     RestartProcessHandler,
 )
+from enforcement.handlers.zerovel import (
+    VelocityHoldRunner,
+    ZeroVelocityHoldHandler,
+)
 
 __all__ = [
     "FilterCommandsHandler",
@@ -24,4 +28,6 @@ __all__ = [
     "DefaultProcessRunner",
     "ExternalAwareProcessRunner",
     "ProcessSpec",
+    "ZeroVelocityHoldHandler",
+    "VelocityHoldRunner",
 ]

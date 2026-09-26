@@ -27,6 +27,24 @@ These are documented in Chapter 4 alongside the attack-detection table.
 The mapping table is module-level so other code (tests, monitors) can
 inspect or override it.
 
+Recovery policies (review stage 3, 2026-09-26)
+----------------------------------------------
+The table above is the `proportionate` policy and stays the default:
+every existing configuration and run is unchanged. Two further tables
+are selected by `recovery.policy` in the architecture YAML — a config
+value, never an architecture branch:
+
+    proportionate   the table above (LOITER on position anomalies)
+    trust_aware     position anomalies -> hold_zero_velocity
+    detect_only     no recovery action for any reason (ablation arm)
+
+`trust_aware` chooses the action by which information the attack has
+compromised. gps_anomaly and cross_check_anomaly both mean the position
+estimate is no longer trustworthy; LOITER holds that very estimate and
+is dragged by it (~50 m, review P1). A zero-velocity hold does not use
+the position estimate. command_injection leaves the estimate intact, so
+its action is unchanged.
+
 Causal chain
 ------------
 RecoveryRequest.caused_by is the IsolationAnnounce.event_id, which in
@@ -46,6 +64,13 @@ class RecoveryAction:
     RESTART_PROCESS = "restart_process"
     FILTER_COMMANDS = "filter_commands"
     MODE_LOITER = "mode_loiter"
+    HOLD_ZERO_VELOCITY = "hold_zero_velocity"
+
+
+class RecoveryPolicy:
+    PROPORTIONATE = "proportionate"
+    TRUST_AWARE = "trust_aware"
+    DETECT_ONLY = "detect_only"
 
 
 REASON_TO_ACTION: dict[str, str] = {
@@ -76,9 +101,44 @@ COARSE_POLICY_REASON_TO_ACTION: dict[str, str] = {
 }
 
 
-def action_for_reason(reason: str) -> Optional[str]:
-    """Look up the canonical recovery action for a reason. None if unknown."""
-    return REASON_TO_ACTION.get(reason)
+# Position-trust-aware policy (review stage 3). heartbeat_loss keeps NO
+# action — the pass-1 regression guard applies to every policy.
+TRUST_AWARE_REASON_TO_ACTION: dict[str, str] = {
+    "command_injection": RecoveryAction.FILTER_COMMANDS,
+    "gps_anomaly": RecoveryAction.HOLD_ZERO_VELOCITY,
+    "cross_check_anomaly": RecoveryAction.HOLD_ZERO_VELOCITY,
+}
+
+# Ablation arm: detection, isolation and the mesh announcement happen as
+# in every C run; no recovery action is requested.
+DETECT_ONLY_REASON_TO_ACTION: dict[str, str] = {}
+
+POLICY_TABLES: dict[str, dict[str, str]] = {
+    RecoveryPolicy.PROPORTIONATE: REASON_TO_ACTION,
+    RecoveryPolicy.TRUST_AWARE: TRUST_AWARE_REASON_TO_ACTION,
+    RecoveryPolicy.DETECT_ONLY: DETECT_ONLY_REASON_TO_ACTION,
+}
+
+
+def _policy_table(policy: str) -> dict[str, str]:
+    try:
+        return POLICY_TABLES[policy]
+    except KeyError:
+        raise ValueError(
+            f"unknown recovery policy {policy!r}; "
+            f"expected one of {sorted(POLICY_TABLES)}"
+        ) from None
+
+
+def action_for_reason(
+    reason: str, policy: str = RecoveryPolicy.PROPORTIONATE
+) -> Optional[str]:
+    """Look up the recovery action for a reason under a policy.
+
+    None if the policy assigns no action to the reason. Raises ValueError
+    for an unknown policy.
+    """
+    return _policy_table(policy).get(reason)
 
 
 class RecoveryDecider:
@@ -92,11 +152,21 @@ class RecoveryDecider:
                coordinator (e.g. 'coordinator_uav_0').
     enabled    False for Architectures A and B — short-circuits all
                evaluations to None. True for C.
+    policy     Name of the reason -> action table (POLICY_TABLES).
+               Default 'proportionate' = the historical behaviour.
     """
 
-    def __init__(self, source: str, *, enabled: bool) -> None:
+    def __init__(
+        self,
+        source: str,
+        *,
+        enabled: bool,
+        policy: str = RecoveryPolicy.PROPORTIONATE,
+    ) -> None:
+        _policy_table(policy)  # fail fast on an unknown policy
         self._source = source
         self._enabled = enabled
+        self._policy = policy
         self._requested: set[str] = set()
 
     # ----- main API -----
@@ -109,9 +179,9 @@ class RecoveryDecider:
         if not announcement.target_uav:
             return None
 
-        action = action_for_reason(announcement.reason)
+        action = action_for_reason(announcement.reason, self._policy)
         if action is None:
-            return None  # unknown reason -> no canonical recovery action
+            return None  # policy assigns no action to this reason
 
         if announcement.target_uav in self._requested:
             return None  # recovery already requested
@@ -141,6 +211,10 @@ class RecoveryDecider:
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    @property
+    def policy(self) -> str:
+        return self._policy
 
     def is_recovery_requested(self, uav_id: str) -> bool:
         return uav_id in self._requested
