@@ -147,6 +147,11 @@ class RunResult:
     recorded per run so the curve never depends on folder naming. On
     A/B (mesh disabled) loss_prob is 0.0 by construction.
     """
+    flight_modes: Optional[dict[str, Any]] = None
+    """Flight-mode timeline per UAV, [{t_wall, mode}] on mode changes
+    (review stage 3a-3). Shows whether a response mode (HOLD, OFFBOARD)
+    was entered and held. None = mission runner cannot observe modes
+    (e.g. null mission) — NOT OBSERVED, never "no change"."""
     recovery_settings: Optional[dict[str, Any]] = None
     """Configured recovery knobs (review stage 3): enabled and policy
     (proportionate / trust_aware / detect_only). Recorded per run so the
@@ -666,6 +671,14 @@ class ExperimentRunner:
             "loss_seed": self._arch_cfg.mesh.loss_seed,
             "delay_sec": self._arch_cfg.mesh.delay_sec,
         }
+        flight_modes: Optional[dict[str, Any]] = None
+        if self._mission_runner is not None and hasattr(
+            self._mission_runner, "flight_modes"
+        ):
+            try:
+                flight_modes = self._mission_runner.flight_modes()
+            except Exception as exc:
+                error = error or f"flight_modes: {exc}"
         recovery_settings = {
             "enabled": self._arch_cfg.recovery.enabled,
             "policy": self._arch_cfg.recovery.policy,
@@ -692,6 +705,7 @@ class ExperimentRunner:
             mesh_cost=mesh_cost,
             mesh_settings=mesh_settings,
             recovery_settings=recovery_settings,
+            flight_modes=flight_modes,
             error=error,
         )
 

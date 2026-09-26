@@ -79,6 +79,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -196,6 +197,19 @@ class DroneController(ABC):
             "zero-velocity hold not supported by this controller"
         )
 
+    # --- Optional flight-mode timeline (review stage 3a-3) ---
+    # No-op defaults: a controller that cannot observe its mode records
+    # nothing, and an empty list reads as NOT OBSERVED, never "no change".
+    @property
+    def flight_mode_log(self) -> list[dict]:
+        return []
+
+    async def start_flight_mode_watch(self) -> None:
+        return None
+
+    async def stop_flight_mode_watch(self) -> None:
+        return None
+
 
 class MavsdkDroneController(DroneController):
     """Real MAVSDK-driven controller. Lazy mavsdk import."""
@@ -218,6 +232,8 @@ class MavsdkDroneController(DroneController):
         # multiple Systems run in parallel (step 10b empirically verified).
         self._grpc_port = grpc_port
         self._drone = None  # mavsdk.System, set on connect
+        self._mode_log: list[dict] = []
+        self._mode_task: Optional[asyncio.Task] = None
 
     async def connect(self) -> None:
         from mavsdk import System  # lazy
@@ -365,6 +381,47 @@ class MavsdkDroneController(DroneController):
             self._drone.action.hold(),
             timeout=self._action_timeout,
         )
+
+    # ----- flight-mode timeline (review stage 3a-3) -----
+
+    @property
+    def flight_mode_log(self) -> list[dict]:
+        """[{t_wall, mode}] — one entry per mode CHANGE, wall clock (same
+        axis as merged.jsonl / trajectory.jsonl). Resolution is PX4's
+        HEARTBEAT rate (~1 Hz): a mode held for less than a heartbeat can
+        be missed. Diagnostic of the response, not a timing metric."""
+        return list(self._mode_log)
+
+    async def start_flight_mode_watch(self) -> None:
+        if self._drone is None or self._mode_task is not None:
+            return
+        self._mode_task = asyncio.ensure_future(self._watch_flight_mode())
+
+    async def _watch_flight_mode(self) -> None:
+        last = None
+        try:
+            async for mode in self._drone.telemetry.flight_mode():
+                name = getattr(mode, "name", str(mode))
+                if name != last:
+                    self._mode_log.append({"t_wall": time.time(), "mode": name})
+                    last = name
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Recording must never fail a flight; mark the gap explicitly.
+            self._mode_log.append(
+                {"t_wall": time.time(), "mode": None, "error": str(exc)}
+            )
+
+    async def stop_flight_mode_watch(self) -> None:
+        task, self._mode_task = self._mode_task, None
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
     async def hold_zero_velocity(self) -> None:
         # OFFBOARD body velocity (0, 0, 0), yawspeed 0 — does not use the
@@ -685,6 +742,17 @@ class MavsdkMissionRunner(MissionRunner):
         """
         return MissionVelocityHoldRunner(self, uav_id, main_loop=main_loop)
 
+    def flight_modes(self) -> dict[str, list[dict]]:
+        """Flight-mode timeline per UAV (see MavsdkDroneController).
+
+        Keyed by uav_id when uav_ids were given, else by endpoint.
+        Survives abort(): read in ExperimentRunner._finalize.
+        """
+        keys = self._uav_ids if self._uav_ids is not None else self._endpoints
+        return {
+            k: c.flight_mode_log for k, c in zip(keys, self._controllers)
+        }
+
     async def start(self) -> None:
         """Connect all, takeoff, upload, start — fully in parallel."""
         if self._started:
@@ -695,6 +763,14 @@ class MavsdkMissionRunner(MissionRunner):
 
         # Phase 1: connect everyone in parallel
         await asyncio.gather(*(c.connect() for c in self._controllers))
+
+        # Flight-mode timeline from connection on (review stage 3a-3), so
+        # takeoff -> MISSION -> response mode -> any fallback is on record.
+        for c in self._controllers:
+            try:
+                await c.start_flight_mode_watch()
+            except Exception:
+                pass
 
         # Phase 2: arm + takeoff in parallel
         await asyncio.gather(
@@ -756,6 +832,14 @@ class MavsdkMissionRunner(MissionRunner):
         async def _safe_disconnect(c: DroneController) -> None:
             try:
                 await c.disconnect()
+            except Exception:
+                pass
+
+        # Close the flight-mode record before RTL: the timeline covers the
+        # trial, not the teardown.
+        for c in self._controllers:
+            try:
+                await c.stop_flight_mode_watch()
             except Exception:
                 pass
 
