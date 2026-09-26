@@ -64,7 +64,7 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Optional
 
@@ -72,6 +72,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PX4_ROOT = Path.home() / "PX4-Autopilot"
 
 VALID_ARCHS = {"A", "B", "C"}
+# Mirrors core.config.VALID_RECOVERY_POLICIES (equality guarded by a test;
+# kept literal so this driver stays importable without the package).
+VALID_POLICIES = {"proportionate", "trust_aware", "detect_only"}
 VALID_ATTACKS = {
     "none",
     "gps_spoofing",
@@ -103,10 +106,15 @@ DEFAULT_CELLS = [
 class Cell:
     arch: str  # "A" / "B" / "C"
     attack: str
+    # Recovery policy arm (review stage 3). None = the YAML value; part of
+    # the key so two arms of the same cell never shadow each other on
+    # resume (C/gps_spoofing@trust_aware != C/gps_spoofing@detect_only).
+    policy: Optional[str] = None
 
     @property
     def key(self) -> str:
-        return f"{self.arch}/{self.attack}"
+        base = f"{self.arch}/{self.attack}"
+        return base if self.policy is None else f"{base}@{self.policy}"
 
 
 def parse_cells(spec: str) -> list[Cell]:
@@ -116,15 +124,24 @@ def parse_cells(spec: str) -> list[Cell]:
         if not raw:
             continue
         if "/" not in raw:
-            raise ValueError(f"bad cell {raw!r}, expected ARCH/ATTACK")
-        arch, attack = raw.split("/", 1)
+            raise ValueError(f"bad cell {raw!r}, expected ARCH/ATTACK[@POLICY]")
+        policy: Optional[str] = None
+        body = raw
+        if "@" in raw:
+            body, policy = raw.rsplit("@", 1)
+            policy = policy.strip()
+            if policy not in VALID_POLICIES:
+                raise ValueError(f"bad policy {policy!r} in {raw!r}")
+        arch, attack = body.split("/", 1)
         arch = arch.strip().upper()
         attack = attack.strip()
         if arch not in VALID_ARCHS:
             raise ValueError(f"bad arch {arch!r} in {raw!r}")
         if attack not in VALID_ATTACKS:
             raise ValueError(f"bad attack {attack!r} in {raw!r}")
-        cells.append(Cell(arch, attack))
+        if policy not in (None, "proportionate") and arch != "C":
+            raise ValueError(f"policy {policy!r} needs architecture C: {raw!r}")
+        cells.append(Cell(arch, attack, policy))
     if not cells:
         raise ValueError("no cells parsed")
     return cells
@@ -147,6 +164,7 @@ class TrialRecord:
     duration_sec: float
     log_dir: str
     started_at: float
+    policy: Optional[str] = None
 
 
 def load_completed(manifest_path: Path) -> set[tuple[str, int]]:
@@ -278,7 +296,8 @@ def run_trial(
     args: argparse.Namespace,
     log_root: Path,
 ) -> TrialRecord:
-    run_id = f"{cell.arch}_{cell.attack}_r{replicate}_{int(time.time())}"
+    arm = "" if cell.policy is None else f"_{cell.policy}"
+    run_id = f"{cell.arch}_{cell.attack}{arm}_r{replicate}_{int(time.time())}"
     log_dir = log_root / f"run_{run_id}"
     started = time.time()
 
@@ -300,8 +319,8 @@ def run_trial(
         cmd += ["--mesh-loss-prob", str(args.mesh_loss_prob)]
     if args.mesh_loss_seed is not None:
         cmd += ["--mesh-loss-seed", str(args.mesh_loss_seed)]
-    if args.recovery_policy is not None:
-        cmd += ["--recovery-policy", args.recovery_policy]
+    if cell.policy is not None:
+        cmd += ["--recovery-policy", cell.policy]
     # Full simulator relaunch around every trial.
     cleanup()
     time.sleep(args.settle)
@@ -311,7 +330,7 @@ def run_trial(
             cell_key=cell.key, replicate=replicate, run_id=run_id,
             arch=cell.arch, attack=cell.attack, status="launch_failed",
             exit_code=None, duration_sec=time.time() - started,
-            log_dir=str(log_dir), started_at=started,
+            log_dir=str(log_dir), started_at=started, policy=cell.policy,
         )
 
     # Post-launch settle: let the simulator + mesh fully establish
@@ -336,7 +355,7 @@ def run_trial(
         cell_key=cell.key, replicate=replicate, run_id=run_id,
         arch=cell.arch, attack=cell.attack, status=status,
         exit_code=exit_code, duration_sec=time.time() - started,
-        log_dir=str(log_dir), started_at=started,
+        log_dir=str(log_dir), started_at=started, policy=cell.policy,
     )
 
 
@@ -357,7 +376,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument(
         "--cells",
         default=",".join(DEFAULT_CELLS),
-        help="comma list of ARCH/ATTACK (default: 4 never-flown A/B cells)",
+        help="comma list of ARCH/ATTACK[@POLICY] (default: 4 never-flown A/B cells)",
     )
     p.add_argument(
         "-n", "--runs-per-cell", type=int, default=1,
@@ -413,9 +432,15 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--recovery-policy", default=None,
-        choices=["proportionate", "trust_aware", "detect_only"],
-        help="pass through to run_one: recovery.policy for every trial "
+        choices=sorted(VALID_POLICIES),
+        help="recovery.policy for cells without their own @POLICY "
              "(review stage 3 arms). Default: none (use the YAML).",
+    )
+    p.add_argument(
+        "--order", default="cell-major",
+        choices=["cell-major", "replicate-major"],
+        help="trial order (default cell-major = historical). "
+             "replicate-major interleaves cells/arms.",
     )
     p.add_argument(
         "--post-launch-settle", type=float, default=20.0,
@@ -427,16 +452,37 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def apply_default_policy(cells: list[Cell], policy: Optional[str]) -> list[Cell]:
+    """--recovery-policy fills cells that carry no @POLICY of their own."""
+    if policy is None:
+        return cells
+    out = [c if c.policy is not None else replace(c, policy=policy) for c in cells]
+    for c in out:
+        if c.policy not in (None, "proportionate") and c.arch != "C":
+            raise ValueError(f"policy {c.policy!r} needs architecture C: {c.key}")
+    return out
+
+
+def build_trials(cells: list[Cell], n: int, order: str) -> list[tuple[Cell, int]]:
+    """Trial list. cell-major (default, historical): all replicates of a
+    cell, then the next cell. replicate-major: replicate 1 of every cell,
+    then replicate 2, ... — interleaves arms so slow drift of the VM over
+    a long batch cannot line up with one arm (review stage 3)."""
+    reps = range(1, n + 1)
+    if order == "cell-major":
+        return [(c, r) for c in cells for r in reps]
+    if order == "replicate-major":
+        return [(c, r) for r in reps for c in cells]
+    raise ValueError(f"bad order {order!r}")
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
-    cells = parse_cells(args.cells)
+    cells = apply_default_policy(parse_cells(args.cells), args.recovery_policy)
     log_root = args.log_root.resolve()
     manifest_path = log_root / "batch_manifest.jsonl"
 
-    # Build the full trial list (cell x replicate).
-    trials: list[tuple[Cell, int]] = [
-        (c, r) for c in cells for r in range(1, args.runs_per_cell + 1)
-    ]
+    trials = build_trials(cells, args.runs_per_cell, args.order)
     total = len(trials)
     est_min = total * (args.attack_at_sec + args.obs_sec + 45) / 60.0
 
@@ -467,7 +513,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "--log-root", str(log_root),
             "--run-id", f"{c0.arch}_{c0.attack}_r1_<ts>",
             "--px4-pid-file", args.px4_pid_file,
-        ]
+        ] + (["--recovery-policy", c0.policy] if c0.policy else [])
         print("  " + " ".join(example))
         _log("--dry-run: no processes started, no files written.")
         return 0

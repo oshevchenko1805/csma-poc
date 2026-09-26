@@ -62,3 +62,25 @@ A run is analysed if the injection was technically executed
 no estimate jump or small drift are OUTCOMES of the policy, never
 exclusion reasons. Runs where the response precedes the EKF estimate
 jump are additionally analysed as a separate stratum.
+
+## Results — Part A (2026-09-26, flown after this plan was committed, 0359d0b)
+
+| run | action | offset | speed at action | post_response_drift | fallback |
+|-----|--------|--------|-----------------|---------------------|----------|
+| zerovel_1790440133 | zerovel | 0 | 4.20 m/s | 2.32 m | none |
+| zerovel_1790440608 | zerovel | 0 | 4.61 m/s | 2.90 m | none |
+| zerovel_1790440769 | zerovel | 0 | 4.50 m/s | 2.91 m | none |
+| loiter_1790441027  | loiter  | 0 | 4.21 m/s | 3.99 m | none |
+
+Raw: VM ~/probe_runs/<run>.
+
+- **H2 magnitude bound B = 2.91 + 5 = 7.91 m** (rule above, applied as written).
+- OFFBOARD held to window end in all three zero-velocity runs (probe path).
+- LOITER brakes only ~1 m longer than zero-velocity hold without attack.
+  The v1 DT LOITER drift (median 8.4 m, action after the estimate jump)
+  is therefore ~4 m above plain braking: something after the jump (EKF
+  reset transient, most likely — not verified) adds drift even when the
+  hold point is already in the shifted frame. Consequence, decided BEFORE
+  any pipeline pilot run: the earlier prediction "no difference in DT" is
+  WITHDRAWN. DT is reported as a mechanism check — difference of medians
+  with CI, no directional or equivalence claim.
