@@ -2014,3 +2014,31 @@ error=None, delivered=410=2*published(205), dropped=0 — delay reaches a
 real run, pipeline and teardown survive a non-empty delay queue, and the
 cost counters are unperturbed. The delay MECHANISM (deferral, FIFO,
 composition with loss) is proven by unit tests, not this run.
+
+
+## REVIEW P1-P2 — physical outcomes (2026-09-26)
+
+Review of the thesis draft found that `mission_degradation_m` is the
+distance to the route polyline, not physical displacement. Under GPS
+spoofing C's LOITER holds the *estimated* position; the estimate jumps by
+the injected 50 m at ~7.5 s (ESTIMATOR_STATUS pos_horiz_ratio > 1 from
+~0.9 s until the jump, ~0.03 after), and the aircraft is pushed ~50 m
+along a side of the square -> route distance 19.7 m. In detector
+takeout the cross-check fires on the jump itself, so LOITER comes after
+it and the aircraft holds (drift ~8 m); route distance 0.24 m because it
+stops on the east=30 side.
+
+New module `metrics/physical_outcomes.py` (+ tests, 11) computes, on all
+414 valid runs of thesis-campaign-v1 (raw archive p1_raw_runs.tar.gz,
+sha256 818eda9c...06d2da5): nav_error (belief vs truth), t_estimate_jump,
+first response + action, post_response_drift (hold actions only),
+route_distance (= old mission_degradation_m, renamed), waypoints_captured
+and mission_execution (vs clean median per arch). Output:
+runs_campaign/physical_outcomes.csv. mission_execution is stable for
+capture radius 3/5/10 m.
+
+Headline (medians): GPS C drift 50.0 m, MT C 50.1 m, DT C 8.4 m; nav error
+~50 m in every spoofed cell of every architecture; mission execution
+0.29 (A/B/C, GPS cells), 0.14 (C, DT), 1.00 (C, command injection),
+0.43 all archs under comm disruption. Next: stage 2 (SITL check of a
+trust-aware hold action).
