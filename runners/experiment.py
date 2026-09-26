@@ -147,6 +147,10 @@ class RunResult:
     recorded per run so the curve never depends on folder naming. On
     A/B (mesh disabled) loss_prob is 0.0 by construction.
     """
+    recovery_settings: Optional[dict[str, Any]] = None
+    """Configured recovery knobs (review stage 3): enabled and policy
+    (proportionate / trust_aware / detect_only). Recorded per run so the
+    stage-3 arms never depend on folder naming."""
     mesh_cost: Optional[dict[str, Any]] = None
     """Mesh message/byte counters folded across the fleet (item 3):
     per peer plus a fleet total, publish vs delivery, per topic. A/B
@@ -339,6 +343,15 @@ class ExperimentRunner:
                     handler.set_runner(
                         self._mission_runner.loiter_runner_for(
                             uav_id, main_loop=main_loop
+                        )
+                    )
+            # Zero-velocity hold (trust_aware policy) borrows the same
+            # live connection; it has no working default runner at all.
+            if hasattr(self._mission_runner, "velocity_hold_runner_for"):
+                for handler in self._fleet.velocity_hold_handlers:
+                    handler.set_runner(
+                        self._mission_runner.velocity_hold_runner_for(
+                            handler.target_uav, main_loop=main_loop
                         )
                     )
             # Give each C filter handler a mission-resume runner so
@@ -653,6 +666,10 @@ class ExperimentRunner:
             "loss_seed": self._arch_cfg.mesh.loss_seed,
             "delay_sec": self._arch_cfg.mesh.delay_sec,
         }
+        recovery_settings = {
+            "enabled": self._arch_cfg.recovery.enabled,
+            "policy": self._arch_cfg.recovery.policy,
+        }
         result = RunResult(
             architecture=self._arch_cfg.architecture,
             run_id=self._run_id,
@@ -674,6 +691,7 @@ class ExperimentRunner:
             belief_divergence=belief_divergence,
             mesh_cost=mesh_cost,
             mesh_settings=mesh_settings,
+            recovery_settings=recovery_settings,
             error=error,
         )
 

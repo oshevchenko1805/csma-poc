@@ -94,6 +94,7 @@ from enforcement.handlers import (
     ProcessRunner,
     ProcessSpec,
     RestartProcessHandler,
+    ZeroVelocityHoldHandler,
 )
 from enforcement.isolation import (
     IsolationEnforcer,
@@ -166,6 +167,12 @@ class WiredFleet:
     # experiment layer can swap each one's MAVSDK runner for a
     # mission-backed one (borrows the live flight connection).
     loiter_handlers: list[ModeLoiterHandler] = field(default_factory=list)
+    # Zero-velocity hold handlers (Architecture C only; used by the
+    # trust_aware policy). No default runner — the experiment layer
+    # injects one backed by the live mission connection.
+    velocity_hold_handlers: list[ZeroVelocityHoldHandler] = field(
+        default_factory=list
+    )
     # Command guards (all architectures). Started/stopped by the
     # experiment runner; actuated only in C by FilterCommandsHandler.
     guards: list = field(default_factory=list)
@@ -501,6 +508,7 @@ def _build_arch_c(
     meshes: list[MeshBus] = []
     filter_handlers: list[FilterCommandsHandler] = []
     loiter_handlers: list[ModeLoiterHandler] = []
+    velocity_hold_handlers: list[ZeroVelocityHoldHandler] = []
     guards = _build_guards(endpoints_by_uav)
 
     for spec in arch_cfg.monitors:
@@ -586,8 +594,12 @@ def _build_arch_c(
         filter_handler = FilterCommandsHandler(
             uav_id=uav_id, guard=guards[uav_id]
         )
+        # Registered under every policy; only trust_aware ever requests
+        # it, so proportionate runs are unaffected.
+        velocity_hold_handler = ZeroVelocityHoldHandler(uav_id)
         filter_handlers.append(filter_handler)
         loiter_handlers.append(loiter_handler)
+        velocity_hold_handlers.append(velocity_hold_handler)
 
         executor = RecoveryExecutor(
             source=f"enforcer_{uav_id}",
@@ -596,10 +608,13 @@ def _build_arch_c(
                 RecoveryAction.RESTART_PROCESS: restart_handler,
                 RecoveryAction.MODE_LOITER: loiter_handler,
                 RecoveryAction.FILTER_COMMANDS: filter_handler,
+                RecoveryAction.HOLD_ZERO_VELOCITY: velocity_hold_handler,
             },
         )
         recovery_decider = RecoveryDecider(
-            source=f"coordinator_{uav_id}", enabled=True
+            source=f"coordinator_{uav_id}",
+            enabled=True,
+            policy=arch_cfg.recovery.policy,
         )
 
         # Recovery completion callback: lift local enforcer + un_isolate
@@ -634,5 +649,6 @@ def _build_arch_c(
         log_dir=log_dir,
         filter_handlers=filter_handlers,
         loiter_handlers=loiter_handlers,
+        velocity_hold_handlers=velocity_hold_handlers,
         guards=list(guards.values()),
     )

@@ -86,6 +86,7 @@ from typing import Callable, Optional
 from attacks.base import ParamWriter
 from core.config import Waypoint
 from enforcement.handlers.loiter import MavsdkRunner
+from enforcement.handlers.zerovel import VelocityHoldRunner
 from runners.missions import MissionRunner
 
 
@@ -188,6 +189,12 @@ class DroneController(ABC):
     # still instantiate. MavsdkDroneController overrides with action.hold().
     async def hold(self) -> None:
         raise NotImplementedError("hold not supported by this controller")
+
+    # --- Optional zero-velocity hold (trust_aware policy, review stage 3) ---
+    async def hold_zero_velocity(self) -> None:
+        raise NotImplementedError(
+            "zero-velocity hold not supported by this controller"
+        )
 
 
 class MavsdkDroneController(DroneController):
@@ -359,6 +366,28 @@ class MavsdkDroneController(DroneController):
             timeout=self._action_timeout,
         )
 
+    async def hold_zero_velocity(self) -> None:
+        # OFFBOARD body velocity (0, 0, 0), yawspeed 0 — does not use the
+        # position estimate (review stage 3; SITL-checked on hover in
+        # stage 2, scripts/probe_trust_hold.py). PX4 rejects OFFBOARD
+        # without a prior setpoint, so the setpoint goes first. MAVSDK
+        # keeps re-sending it while this System lives, i.e. for the rest
+        # of the run: the mission connection outlives the observation
+        # window, so the stream never stops mid-window.
+        assert self._drone is not None
+        from mavsdk.offboard import VelocityBodyYawspeed  # lazy
+
+        await asyncio.wait_for(
+            self._drone.offboard.set_velocity_body(
+                VelocityBodyYawspeed(0.0, 0.0, 0.0, 0.0)
+            ),
+            timeout=self._action_timeout,
+        )
+        await asyncio.wait_for(
+            self._drone.offboard.start(),
+            timeout=self._action_timeout,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Mission runner
@@ -505,6 +534,48 @@ class MissionResumeRunner:
         )
 
 
+class MissionVelocityHoldRunner(VelocityHoldRunner):
+    """VelocityHoldRunner backed by a live mission controller.
+
+    Same lazy-resolve + cross-loop bridge contract as MissionLoiterRunner:
+    the MAVSDK System lives on the main loop, recovery runs on the
+    mesh-receiver thread, so hold_zero_velocity() is scheduled back onto
+    the main loop with run_coroutine_threadsafe. Borrowing the mission
+    connection is also what keeps the OFFBOARD setpoint stream alive.
+    """
+
+    DEFAULT_BRIDGE_TIMEOUT_SEC: float = 10.0
+
+    def __init__(
+        self,
+        runner: "MavsdkMissionRunner",
+        uav_id: str,
+        *,
+        main_loop=None,
+        bridge_timeout_sec: float = DEFAULT_BRIDGE_TIMEOUT_SEC,
+    ) -> None:
+        self._runner = runner
+        self._uav_id = uav_id
+        self._main_loop = main_loop
+        self._bridge_timeout = bridge_timeout_sec
+
+    async def hold_zero_velocity(self) -> None:
+        controller = self._runner.controller_for(self._uav_id)
+        try:
+            current = asyncio.get_running_loop()
+        except RuntimeError:
+            current = None
+        if self._main_loop is None or current is self._main_loop:
+            await controller.hold_zero_velocity()
+            return
+        future = asyncio.run_coroutine_threadsafe(
+            controller.hold_zero_velocity(), self._main_loop
+        )
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: future.result(timeout=self._bridge_timeout)
+        )
+
+
 class MavsdkMissionRunner(MissionRunner):
     """Drive N UAVs through a coordinated NED waypoint sequence."""
 
@@ -603,6 +674,16 @@ class MavsdkMissionRunner(MissionRunner):
         cross-loop bridge contract as loiter_runner_for.
         """
         return MissionResumeRunner(self, uav_id, main_loop=main_loop)
+
+    def velocity_hold_runner_for(
+        self, uav_id: str, *, main_loop=None
+    ) -> MissionVelocityHoldRunner:
+        """Lend this UAV's live connection as a zero-velocity-hold runner.
+
+        Recovery action of the trust_aware policy. Same lazy-resolve +
+        cross-loop bridge contract as loiter_runner_for.
+        """
+        return MissionVelocityHoldRunner(self, uav_id, main_loop=main_loop)
 
     async def start(self) -> None:
         """Connect all, takeoff, upload, start — fully in parallel."""

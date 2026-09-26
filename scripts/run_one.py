@@ -60,6 +60,8 @@ from attacks.monitor_takeout import MonitorTakeoutInjector  # noqa: E402
 from runners.trajectory import TrajectoryRecorder  # noqa: E402
 from attacks.composite import SequentialAttackInjector  # noqa: E402
 from core.config import (  # noqa: E402
+    DEFAULT_RECOVERY_POLICY,
+    VALID_RECOVERY_POLICIES,
     ConfigError,
     ExperimentConfig,
     load_architecture_config,
@@ -187,6 +189,30 @@ def apply_mesh_override(arch_cfg, *, loss_prob, loss_seed):
     return replace(arch_cfg, mesh=new_mesh)
 
 
+def apply_recovery_policy_override(arch_cfg, *, policy):
+    """Override recovery.policy from the CLI (review stage 3 arms).
+
+    Same provenance rule as apply_mesh_override: the value lives in the
+    run command / batch manifest and in run_summary.recovery_settings,
+    never in a mutated YAML. None -> arch_cfg unchanged. A non-default
+    policy needs recovery enabled (architecture C); the check mirrors
+    the loader invariant so a CLI override cannot bypass it.
+    """
+    if policy is None:
+        return arch_cfg
+    if policy not in VALID_RECOVERY_POLICIES:
+        raise ConfigError(
+            f"--recovery-policy {policy!r} not in "
+            f"{sorted(VALID_RECOVERY_POLICIES)}"
+        )
+    if policy != DEFAULT_RECOVERY_POLICY and not arch_cfg.recovery.enabled:
+        raise ConfigError(
+            f"--recovery-policy {policy!r} requires recovery enabled "
+            f"(architecture C); got architecture {arch_cfg.architecture!r}"
+        )
+    return replace(arch_cfg, recovery=replace(arch_cfg.recovery, policy=policy))
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Run one CSMA experiment trial against live PX4 SITL.",
@@ -282,6 +308,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "override mesh loss RNG seed for this trial. Makes "
             "UNIT tests deterministic; live runs stay stochastic "
             "(TCP timing). Default: architecture_c.yaml (none)."
+        ),
+    )
+    p.add_argument(
+        "--recovery-policy",
+        choices=sorted(VALID_RECOVERY_POLICIES),
+        default=None,
+        help=(
+            "override recovery.policy (review stage 3 arms; architecture "
+            "C only for non-default values). Default: the YAML value "
+            "(proportionate)."
         ),
     )
     return p.parse_args(argv)
@@ -442,6 +478,9 @@ def main(argv: list[str] | None = None) -> int:
         arch_cfg,
         loss_prob=args.mesh_loss_prob,
         loss_seed=args.mesh_loss_seed,
+    )
+    arch_cfg = apply_recovery_policy_override(
+        arch_cfg, policy=args.recovery_policy
     )
 
     run_id = args.run_id or f"{args.arch}_{args.attack}_{int(time.time())}"

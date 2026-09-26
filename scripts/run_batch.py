@@ -300,6 +300,8 @@ def run_trial(
         cmd += ["--mesh-loss-prob", str(args.mesh_loss_prob)]
     if args.mesh_loss_seed is not None:
         cmd += ["--mesh-loss-seed", str(args.mesh_loss_seed)]
+    if args.recovery_policy is not None:
+        cmd += ["--recovery-policy", args.recovery_policy]
     # Full simulator relaunch around every trial.
     cleanup()
     time.sleep(args.settle)
@@ -408,6 +410,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--mesh-loss-seed", type=int, default=None,
         help="pass through to run_one: mesh loss RNG seed for "
              "every trial. Default: none (use architecture_c.yaml).",
+    )
+    p.add_argument(
+        "--recovery-policy", default=None,
+        choices=["proportionate", "trust_aware", "detect_only"],
+        help="pass through to run_one: recovery.policy for every trial "
+             "(review stage 3 arms). Default: none (use the YAML).",
     )
     p.add_argument(
         "--post-launch-settle", type=float, default=20.0,

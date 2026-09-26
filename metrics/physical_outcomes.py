@@ -90,7 +90,7 @@ Nominal SITL tracking error is well under 5 m (derived.ON_PLAN_TOLERANCE_M
 docstring)."""
 
 
-HOLD_ACTIONS = frozenset({"mode_loiter"})
+HOLD_ACTIONS = frozenset({"mode_loiter", "hold_zero_velocity"})
 """Recovery actions whose purpose is to keep the aircraft where it is."""
 
 
