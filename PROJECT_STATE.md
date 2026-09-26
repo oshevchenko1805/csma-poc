@@ -2042,3 +2042,41 @@ Headline (medians): GPS C drift 50.0 m, MT C 50.1 m, DT C 8.4 m; nav error
 0.29 (A/B/C, GPS cells), 0.14 (C, DT), 1.00 (C, command injection),
 0.43 all archs under comm disruption. Next: stage 2 (SITL check of a
 trust-aware hold action).
+
+
+## REVIEW STAGE 2 — SITL probe of a trust-aware hold (2026-09-26) — PASS
+
+Question: does an action that does not act on the attacked channel stop
+the spoof-induced drift that LOITER suffers? The GZBridge patch falsifies
+GPS lat/lon only; GPS velocity stays true. Candidate: OFFBOARD body
+velocity (0,0,0), yawspeed 0 ("zerovel"). Criteria pre-registered in
+metrics/trust_hold_probe.py before the first flight (acfe338): control
+loiter drift > 40 m, PASS = zerovel post_response_drift < 5 m with the
+action accepted and OFFBOARD held; max two attempts.
+
+Probe: scripts/probe_trust_hold.py (+9 tests, 833 -> 842). uav_0 only,
+hover 15 m, no mesh/monitors (action isolated, detection emulated at
++3.0 s = campaign C MTTD), SIM_GPS_OFF_N=50, 60 s window, definitions
+reused from metrics/physical_outcomes.py. Fix c21d7a9: fallback_mode now
+counts the mode already active at action time (loiter was mislabelled
+"never entered HOLD"; verdict unaffected).
+
+| arm     | t_estimate_jump | post_response_drift | nav_error_end | verdict    |
+|---------|-----------------|---------------------|---------------|------------|
+| loiter  | 7.32 s          | 49.8 m              | 50.0 m        | CONTROL OK |
+| zerovel | 7.27 s          | 0.18 m              | 50.0 m        | PASS       |
+
+Raw: VM ~/probe_runs/loiter_1790420733, ~/probe_runs/zerovel_1790421455.
+
+Reading: the estimate is corrupted identically in both arms; zerovel does
+not repair navigation, it stops acting on it. Physical containment
+~50 m -> ~0.2 m, first attempt.
+
+Limits (must go into Ch.3/4 as stated): n=1 per arm; hover, not mission;
+the win depends on the velocity channel being intact — a spoofer that
+falsifies GNSS velocity consistently defeats zerovel (by construction of
+this attack model, name it). Zero-velocity hold is containment, not
+mission recovery: the aircraft stops, it does not continue the route.
+Next: stage 3 (H2 + metrics in repo before running -> action handler +
+tests -> campaign: current C / C without recovery / C with new policy
+x 3 GPS scenarios), in a new chat.
