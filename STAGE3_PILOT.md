@@ -151,3 +151,16 @@ the closing speed (a stationary UAV is hit at cruise speed — B1).
 - **OPEN-5** (after the campaign, existing data, no new flights): check
   whether v1 false positives (fp_census, 17 runs) and the 1–2 m baseline
   deviation peaks coincide with peer contacts.
+
+## Results — Part B re-flown with 5 m layers (runs_pilot3b_alt, commit 7d501d4)
+
+| run | policy | acks | modes | drift | jump | min peer sep pre / post | contacts |
+|-----|--------|------|-------|-------|------|--------------------------|----------|
+| GPS | trust_aware | hold_zero_velocity ×2 | OFFBOARD +4.1 s, held | 1.68 m | 8.11 s | 5.00 / 4.39 m | 0 |
+| MT+GPS | trust_aware | hold_zero_velocity ×3 | OFFBOARD +3.5 s, held | 1.59 m | 7.68 s | 4.94 / 4.80 m | 0 |
+| DT+GPS | trust_aware | hold_zero_velocity | OFFBOARD +7.8 s, held | 3.83 m | 7.82 s | 4.75 / 4.86 m | 0 |
+| GPS | proportionate | mode_loiter ×2 | HOLD +3.9 s | 49.99 m | 7.97 s | 4.82 / 5.00 m | 0 |
+| GPS | detect_only | none | MISSION | — | 6.31 s | 5.11 / 5.21 m | 0 |
+
+All injections confirmed. **GO** (incl. the added no-contact condition).
+Next: H2_PREREGISTRATION.md, then the campaign.
