@@ -120,3 +120,34 @@ its route lies on its peers' routes.
   frame. No hypothesis is tested on it.
 - Altitude deconfliction (stop + climb out of the formation layer) is a
   separate, later arm — not mixed into H2.
+
+## Correction — contacts are a property of the testbed, not of the policy
+
+metrics.peer_separation over the 60 s BEFORE injection (no response
+possible yet): contact (< 1 m) in **13 of 34** clean v1 flights
+(runs_campaign/base_pass1-3, A/B/C none; min 0.28 m) and in 3 of 5 pilot
+runs; near miss (< 3 m) in 30 of 34. Cause: the three 30×30 m squares
+share the 20 m layer and are offset only 5/10 m east, so on the
+east-west legs the UAVs fly in line, and any start-time lag closes the
+gap. The statement "stopping one vehicle creates a collision hazard for
+the swarm" (previous section) is therefore WITHDRAWN as a finding: the
+hazard exists without any response. What is specific to a stop is only
+the closing speed (a stationary UAV is hit at cruise speed — B1).
+
+## Decision (2026-09-26): vertical separation for the stage-3 campaign
+
+- `mission.altitude_layer_step_m` (default 0.0 = v1 geometry): sysid s
+  flies (s−1)·step higher, takeoff and every waypoint. Campaign value
+  **5.0 m** → uav_0 20 m (unchanged: attack target, same as v1 and as
+  the Part-A reference), uav_1 25 m, uav_2 30 m. Recorded per run in
+  run_summary.mission_plan.altitude_layer_step_m.
+- All three arms, including the control "current C", fly the new
+  geometry: within-campaign comparisons are unaffected. The control arm
+  also bridges to v1: if it reproduces v1 C (drift ~50 m, jump ~7.5 s),
+  the geometry change does not move the key metrics.
+- B = 7.91 m unchanged (Part A flew uav_0 alone at 20 m).
+- Part B is re-flown (n=1 per row) with the new geometry before the
+  campaign; GO additionally requires no contact (< 1 m) in those runs.
+- **OPEN-5** (after the campaign, existing data, no new flights): check
+  whether v1 false positives (fp_census, 17 runs) and the 1–2 m baseline
+  deviation peaks coincide with peer contacts.

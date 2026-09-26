@@ -170,12 +170,23 @@ class MissionConfig:
     duration_sec: float
     waypoints: tuple[Waypoint, ...]   # expanded plan (lap pattern x laps)
     laps: int = 1
+    # Vertical separation between UAVs (review stage 3): the UAV with
+    # sysid s flies (takeoff and every waypoint) (s - 1) * step metres
+    # higher. 0.0 = the historical single-layer formation of
+    # thesis-campaign-v1, in which peers touched in 13 of 34 clean flights
+    # (STAGE3_PILOT.md). sysid 1 (uav_0, the attack target) is never moved.
+    altitude_layer_step_m: float = 0.0
 
     def __post_init__(self) -> None:
         # Total invariants: hold for loader-built AND hand-built configs
         # (tests construct MissionConfig directly).
         if self.laps < 1:
             raise ConfigError(f"mission.laps: must be >= 1, got {self.laps}")
+        if self.altitude_layer_step_m < 0.0:
+            raise ConfigError(
+                "mission.altitude_layer_step_m: must be >= 0, got "
+                f"{self.altitude_layer_step_m}"
+            )
         if self.waypoints and len(self.waypoints) % self.laps != 0:
             raise ConfigError(
                 f"mission: expanded waypoints ({len(self.waypoints)}) is not "
@@ -519,7 +530,11 @@ def _reject_consecutive_duplicates(
 def _parse_mission(raw: dict[str, Any]) -> MissionConfig:
     ctx = "mission"
     _require_keys(raw, {"type", "duration_sec", "waypoints"}, ctx)
-    _no_extra_keys(raw, {"type", "duration_sec", "waypoints", "laps"}, ctx)
+    _no_extra_keys(
+        raw,
+        {"type", "duration_sec", "waypoints", "laps", "altitude_layer_step_m"},
+        ctx,
+    )
 
     mission_type = _enum(str(raw["type"]), VALID_MISSION_TYPES, f"{ctx}.type")
     duration = float(raw["duration_sec"])
@@ -540,6 +555,7 @@ def _parse_mission(raw: dict[str, Any]) -> MissionConfig:
         duration_sec=duration,
         waypoints=expanded,
         laps=laps,
+        altitude_layer_step_m=float(raw.get("altitude_layer_step_m", 0.0)),
     )
 
 

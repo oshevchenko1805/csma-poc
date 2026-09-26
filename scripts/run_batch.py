@@ -321,6 +321,8 @@ def run_trial(
         cmd += ["--mesh-loss-seed", str(args.mesh_loss_seed)]
     if cell.policy is not None:
         cmd += ["--recovery-policy", cell.policy]
+    if args.altitude_layer_step is not None:
+        cmd += ["--altitude-layer-step", str(args.altitude_layer_step)]
     # Full simulator relaunch around every trial.
     cleanup()
     time.sleep(args.settle)
@@ -435,6 +437,11 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         choices=sorted(VALID_POLICIES),
         help="recovery.policy for cells without their own @POLICY "
              "(review stage 3 arms). Default: none (use the YAML).",
+    )
+    p.add_argument(
+        "--altitude-layer-step", type=float, default=None,
+        help="pass through to run_one: vertical separation between UAVs "
+             "(m; review stage 3). Default: none (experiment.yaml, 0.0).",
     )
     p.add_argument(
         "--order", default="cell-major",

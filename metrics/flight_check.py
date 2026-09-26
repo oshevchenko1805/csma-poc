@@ -317,6 +317,9 @@ def mission_plan_summary(
         "type": str(getattr(mission_cfg, "type", "")),
         "duration_sec": float(getattr(mission_cfg, "duration_sec", 0.0)),
         "laps": laps,
+        "altitude_layer_step_m": float(
+            getattr(mission_cfg, "altitude_layer_step_m", 0.0) or 0.0
+        ),
         "n_waypoints": len(waypoints),
         "lap_waypoints": lap_waypoints,
         "waypoints": [_wp(w) for w in waypoints],

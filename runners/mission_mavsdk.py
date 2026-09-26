@@ -648,6 +648,7 @@ class MavsdkMissionRunner(MissionRunner):
         takeoff_altitude_m: float = DEFAULT_TAKEOFF_ALT_M,
         poll_period_sec: float = DEFAULT_POLL_PERIOD_SEC,
         uav_ids: Optional[list[str]] = None,
+        alt_offsets_m: Optional[list[float]] = None,
     ) -> None:
         if not endpoints:
             raise ValueError("endpoints must be non-empty")
@@ -659,6 +660,10 @@ class MavsdkMissionRunner(MissionRunner):
             raise ValueError("poll_period_sec must be positive")
         if uav_ids is not None and len(uav_ids) != len(endpoints):
             raise ValueError("uav_ids must match endpoints length")
+        if alt_offsets_m is not None and len(alt_offsets_m) != len(endpoints):
+            raise ValueError("alt_offsets_m must match endpoints length")
+        if alt_offsets_m is not None and any(o < 0 for o in alt_offsets_m):
+            raise ValueError("alt_offsets_m must be >= 0")
 
         self._endpoints = list(endpoints)
         self._waypoints = list(waypoints)
@@ -674,6 +679,14 @@ class MavsdkMissionRunner(MissionRunner):
         # on endpoint-string parsing. None = mapping not provided.
         self._uav_ids: Optional[list[str]] = (
             list(uav_ids) if uav_ids is not None else None
+        )
+
+        # Per-UAV vertical offset (parallel to _endpoints), added to the
+        # takeoff altitude and every waypoint. Zeros = single layer.
+        self._alt_offsets: list[float] = (
+            [float(o) for o in alt_offsets_m]
+            if alt_offsets_m is not None
+            else [0.0] * len(self._endpoints)
         )
 
         self._controllers: list[DroneController] = []
@@ -775,13 +788,13 @@ class MavsdkMissionRunner(MissionRunner):
         # Phase 2: arm + takeoff in parallel
         await asyncio.gather(
             *(
-                c.arm_and_takeoff(altitude_m=self._takeoff_alt)
-                for c in self._controllers
+                c.arm_and_takeoff(altitude_m=self._takeoff_alt + off)
+                for c, off in zip(self._controllers, self._alt_offsets)
             )
         )
 
         # Phase 3: convert NED → GPS per controller's home, upload, start
-        async def _per_controller_setup(c: DroneController) -> None:
+        async def _per_controller_setup(c: DroneController, off: float) -> None:
             # home_alt is unused for waypoint altitude (MAVSDK takes
             # home-relative altitude), but get_home_position still
             # returns it; we only need lat/lon for the NED→GPS conversion.
@@ -792,7 +805,7 @@ class MavsdkMissionRunner(MissionRunner):
                     home_lon=home_lon,
                     north_m=wp.north_m,
                     east_m=wp.east_m,
-                    alt_m=wp.alt_m,
+                    alt_m=wp.alt_m + off,
                 )
                 for wp in self._waypoints
             ]
@@ -800,7 +813,10 @@ class MavsdkMissionRunner(MissionRunner):
             await c.start_mission()
 
         await asyncio.gather(
-            *(_per_controller_setup(c) for c in self._controllers)
+            *(
+                _per_controller_setup(c, off)
+                for c, off in zip(self._controllers, self._alt_offsets)
+            )
         )
 
         self._started = True

@@ -213,6 +213,21 @@ def apply_recovery_policy_override(arch_cfg, *, policy):
     return replace(arch_cfg, recovery=replace(arch_cfg.recovery, policy=policy))
 
 
+def apply_altitude_layer_override(exp_cfg, *, step):
+    """Override mission.altitude_layer_step_m from the CLI (review stage 3).
+
+    None -> exp_cfg unchanged (YAML value, 0.0 = v1 single layer). The
+    value travels in run_summary.mission_plan, never in a mutated YAML.
+    MissionConfig.__post_init__ rejects negative steps.
+    """
+    if step is None:
+        return exp_cfg
+    return replace(
+        exp_cfg,
+        mission=replace(exp_cfg.mission, altitude_layer_step_m=float(step)),
+    )
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Run one CSMA experiment trial against live PX4 SITL.",
@@ -311,6 +326,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--altitude-layer-step",
+        type=float,
+        default=None,
+        help=(
+            "vertical separation between UAVs in metres: sysid s flies "
+            "(s-1)*step higher (review stage 3). Default: experiment.yaml "
+            "(0.0 = v1 single layer)."
+        ),
+    )
+    p.add_argument(
         "--recovery-policy",
         choices=sorted(VALID_RECOVERY_POLICIES),
         default=None,
@@ -386,7 +411,10 @@ def build_mavsdk_mission(
     endpoints: list[str] = []
     uav_ids: list[str] = []
     endpoint_to_grpc: dict[str, int] = {}
+    step = exp_cfg.mission.altitude_layer_step_m
+    alt_offsets: list[float] = []
     for ep in sorted(exp_cfg.telemetry.endpoints, key=lambda e: e.sysid):
+        alt_offsets.append((ep.sysid - 1) * step)
         port = 14560 + (ep.sysid - 1)
         url = f"udpin://0.0.0.0:{port}"
         endpoints.append(url)
@@ -402,6 +430,7 @@ def build_mavsdk_mission(
         controller_factory=factory,
         takeoff_altitude_m=takeoff_altitude_m,
         uav_ids=uav_ids,
+        alt_offsets_m=alt_offsets,
     )
 
 
@@ -474,6 +503,9 @@ def main(argv: list[str] | None = None) -> int:
     exp_path = CONFIGS_DIR / "experiment.yaml"
     arch_cfg = load_architecture_config(arch_path)
     exp_cfg = load_experiment_config(exp_path)
+    exp_cfg = apply_altitude_layer_override(
+        exp_cfg, step=args.altitude_layer_step
+    )
     arch_cfg = apply_mesh_override(
         arch_cfg,
         loss_prob=args.mesh_loss_prob,
