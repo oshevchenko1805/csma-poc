@@ -2159,3 +2159,45 @@ Framing decided (review doc, "Этап 4: решения по подаче"): th
 stays A/B/C comparison; the recovery-action finding is presented as a
 limitation found by the comparison -> design requirement -> verified by
 H2 (not "fixed it"). Next: Ch.4 text rewrite (P4), new chat.
+
+
+## REVIEW STAGE 4 (part 2) — Ch.4 text rewritten (2026-09-27) — DONE
+
+Framing as decided in part 1: A/B/C comparison -> limitation (the
+response acts on the attacked estimate) -> design requirement -> H2 ->
+robustness. File: thesis_text/CH4_V2_TEXT.md (Ukrainian, paste-ready):
+sections 4.1-4.8, tables 4.1-4.12 and D.1-D.3, figures 4.1-4.4 and D.1
+with captions, conclusions 4.8 with principle table 4.12 (attack class ->
+compromised data -> admissible / inadmissible action -> evidence).
+
+0c902da  text + tables/figures. metrics/ch4_physical_tables.py now also
+         builds the H2 panel (table 4.7 B) from metrics.h2_analysis.verdict
+         (same numbers as H2_PREREGISTRATION.md: 1.53 vs 50.13 m, 1.44 vs
+         50.12 m, CONFIRMED). Tables 4.6/4.7 swapped against the draft so
+         numbering follows first mention: 4.6 = mission execution (+ CI
+         recovery), 4.7 = GPS nav integrity (A: v1 A/B/C, B: H2).
+         Old GPS Recovery Success / MTTR / Stabilisation Level, old fig 4.4
+         trade-off, Total Response Time and table 4.5 panel D dropped.
+9a0acfd  4.8 conclusions + table 4.12; thesis_text/NOVELTY_DRAFT.md —
+         "вперше / удосконалено / набуло подальшого розвитку" for the
+         Introduction; "вперше" conditional on the literature check
+         (P3, P9), with the downgrade wording written in.
+ca073ea  4.7.2 no-attack alarms from OPEN-5: 17 FP runs = 11 collision
+         falls (gps/cross_check) + 6 simulator stream stalls (heartbeat);
+         0/414 alarms without a physical anomaly (Wilson 0-0.009); both
+         caveats stated (11/11 is exploratory; no real sensor noise).
+         "FP loop depth" withdrawn.
+
+Tests 968 -> 972 (VM). H1 presented as verification of an architectural
+property, not as a finding; cross-check described as a detection path in
+another failure domain, not an independent measurement (P6 wording in
+Ch.4 only).
+
+Open, Ch.4: redraw fig D.1 (old fig4_2_sustain has an in-figure title and
+notes); move the text into the docx.
+Open, Ch.3 (stage 6), needed for consistency with Ch.4: 3.5.5 says H2-H7
+"have no hypothesis status" -> add a paragraph on the pre-registered H2;
+table 3.14 -> add nav error, drift after response, mission execution;
+add Kerns et al. 2014 to the references.
+Review doc: P1, P4 -> Закрыто; stage 4 -> Готово.
+Next: stage 5 — checkpoint: variant B (peer-assisted navigation) or not.
