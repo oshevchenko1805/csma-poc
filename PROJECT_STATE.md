@@ -2418,3 +2418,65 @@ Review doc updated: stage table (row 5), P6, new section "Этап 5:
 Next (new chat): item 8 metrics/h3_analysis.py (calibration check,
 per-flight metrics, inclusion, decision as code + tests), item 9
 run_one/run_batch; then the 20 H3 flights.
+
+## REVIEW STAGE 5 (part 5) — B1 implementation items 8-9 done (2026-09-27)
+
+No B1 flight yet. H3 rules are frozen as code before the first flight.
+
+c66c35e  8 metrics/h3_analysis.py: executable H3 rules. t0 =
+         attack_evidence.gps_spoofing.t_target_set (OFF_N write), NOT the
+         runner's inject_start / attack_fired_wall (precedes it by the OFF_R
+         round trips; reported as inject_lag_s). W = 120 s. Inclusion:
+         no error, truth feed ran, t_target_set present, rate_confirmed
+         True, GPS_RAW_INT offset at W >= 5 m (outcomes never exclude).
+         Metrics: t_rng_peer/self, t_gps, t_cc, harm_at_alarm (B0 def,
+         +-0.25 s), t_jump, max_step_1s, nav_error_end, misattributions
+         (split victim monitor / peers), false alarms (whole no-attack
+         flight), S3 drift_itt/creep/vel_err (truth vel = 1 s central
+         diff). Verdict order: INVALID CONFIG (arch != C, no range_source
+         seed, ranging constants != 1.8/1.3/3) > INCOMPLETE (L1 != 5 or
+         no-attack != 3 included) > NOT APPLICABLE (v1 fired at L1) > NOT
+         CONFIRMED on any false alarm > k/5 rule; Wilson CI; P-B1-2
+         HOLDS/FALSIFIED/UNDETERMINED. `python3 -m metrics.h3_analysis
+         runs_h3` = status only (allowed during flights); `--final` =
+         rows + verdict. Checked on a stage-3 run: jump 7.29 s, gps
+         2.98 s, cc 7.36 s, drift 1.07 m (matches earlier analysis).
+44b5642  9a run_one: --arch c_ranging, --spoof-rate (every gps_spoofing
+         child, composites kept), --range-seed (default crc32(run id));
+         TruthBuffer fed by TrajectoryRecorder on_sample; range_source
+         passed to ExperimentRunner; RunResult.range_source = describe()
+         (seed) in run_summary (null in v1); ranging config without
+         --mission mavsdk -> ConfigError. h3_analysis: no Gazebo truth
+         feed -> excluded (recorder start errors are swallowed; ranging
+         would be silent by construction).
+7aba058  9b run_batch: cells ARCH/ATTACK:LEVEL@POLICY (L30/L10/L3/L1 ->
+         --spoof-rate; LEVEL_RATES mirrors h3_analysis, test-guarded),
+         arch C_RANGING; --preset h3 = the 20 flights (counts == h3
+         PLANNED), attack 90 s, layers 5 m, obs 125 s (W = 120 s from
+         t_target_set + 5 s margin), no-attack flights 1st/10th/20th,
+         attack cells at (r - 0.5)/n (L1 at 2, 9, 11, 12, 19).
+         trial_command()/trial_run_id() pure. Dry-run on VM: plan OK.
+Implementation choices written into H3_PREREGISTRATION.md (notes under
+items 8 and 9) before any flight.
+Tests 1130 -> 1217 (VM).
+
+Live wiring checked on stage-3 data: announcements (GLOBAL_POSITION_INT
+receive time) and Gazebo truth share the wall clock; truth gaps ~0.3 s
+(p95 0.38 s) vs 0.5 s tolerance; 134/135 runs > 99 % of 1 Hz ticks.
+Result risk (stated, not a problem): worst-case model harm margin at L1
+is 0.2 m -> PARTIAL is a realistic outcome; the rules cover it.
+
+Re-flying an excluded flight: same root, explicit cell, -n = next number,
+e.g. --cells C_RANGING/gps_spoofing:L1@detect_only -n 6 --attack-at-sec 90
+--observation-after-attack-sec 125 --altitude-layer-step 5 --log-root runs_h3
+(resume skips r1-r5).
+
+Review doc updated: P6, stage table (row 5), new section "Этап 5:
+реализация B1, пункты 8-9", journal.
+Next (new chat): step 10 — ranging health counters in monitor stats
+(evaluated / no own position / no range; not outcomes), then ONE
+technical L30 flight into runs_h3_smoke, declared in the prereg first;
+read only setup fields (t_target_set, rate_confirmed, range_source,
+trajectory_stats, counters, window_short_s), no alarm events. Then
+run_batch --preset h3 --log-root runs_h3 (~90 min); during the series
+only `python3 -m metrics.h3_analysis runs_h3` (status).
