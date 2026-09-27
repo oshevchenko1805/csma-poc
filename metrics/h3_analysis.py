@@ -11,10 +11,13 @@ the original rule's result is still reported.
 Time anchor
 -----------
 t0 = attack_evidence.gps_spoofing.t_target_set: the wall-clock instant
-SIM_GPS_OFF_N was written. With a spoof rate, fire() first reads and
-writes SIM_GPS_OFF_R, so the runner's inject_start marker
-(attack_fired_wall) precedes the real onset; it is used only for
-no-attack flights (no injection) and reported as inject_lag_s.
+SIM_GPS_OFF_N was written. Order in the runner: attack_fired_wall ->
+fire() (with a spoof rate: read and write SIM_GPS_OFF_R, then write
+OFF_N = t_target_set) -> inject_start marker (logged after fire()
+returns). So attack_fired_wall precedes the onset by the OFF_R round
+trips and the inject_start marker follows it (inject_lag_s =
+t0 - inject_start <= 0). The marker is used as t0 only for no-attack
+flights (no injection).
 Every t_* below is relative to t0. Window W = 120 s.
 
 Inclusion (per flight; an outcome is NEVER a reason to exclude)

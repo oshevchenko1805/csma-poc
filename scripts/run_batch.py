@@ -516,9 +516,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 H3_ATTACK_AT_SEC = 90.0
 H3_OBS_SEC = 125.0
-"""Analysis window W = 120 s runs from t_target_set (the OFF_N write), which
-lags the runner's inject marker by the OFF_R round trips; 5 s margin so
-the window is always inside the observation."""
+"""Analysis window W = 120 s runs from t_target_set (the OFF_N write, inside
+fire(), just before the inject_start marker); inject_end = inject_start +
+125 s, so W always ends inside the observation (5 s margin)."""
 H3_LAYER_STEP_M = 5.0
 H3_NO_ATTACK = Cell("C_RANGING", "none", "detect_only")
 H3_ATTACK_CELLS: list[tuple[Cell, int]] = [

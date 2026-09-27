@@ -402,9 +402,12 @@ attack flights).
    [Implementation, before any flight. Where the text above left a
    choice open, the code fixes it as follows (tests/test_h3_analysis.py):
    - t0 = attack_evidence.gps_spoofing.t_target_set (the OFF_N write),
-     not the runner's inject_start marker, which precedes it by the
-     OFF_R round trips (reported as inject_lag_s). No-attack flights
-     use the marker.
+     not the runner's attack_fired_wall, which precedes it by the OFF_R
+     round trips, nor the inject_start marker, which the runner logs
+     after fire() returns, i.e. just after t0 (inject_lag_s = t0 -
+     inject_start <= 0). No-attack flights use the marker.
+     [Wording corrected before any flight, 2026-09-27: the first
+     version said the marker precedes t0; the code is unchanged.]
    - Inclusion also requires t_target_set present and rate_confirmed
      True (OFF_R read back = requested rate). Both are setup checks, not
      outcomes; otherwise the flight's level is unknown. Every flight
@@ -435,8 +438,10 @@ attack flights).
    --spoof-rate r --range-seed s` (seed default: crc32 of the run id,
    logged as run_summary.range_source); `run_batch --preset h3` fixes
    the 20 flights, attack at 90 s, layers 5 m and an observation of
-   125 s: the analysis window W = 120 s starts at t_target_set, which
-   lags the runner's marker by the OFF_R round trips, so 5 s margin.
+   125 s: the analysis window W = 120 s starts at t_target_set, just
+   before the inject_start marker, and inject_end = inject_start + 125 s,
+   so W always ends inside the observation (5 s margin kept; wording
+   corrected before any flight, 2026-09-27).
    Order: no-attack flights 1st, 10th and 20th; attack cells
    replicate-major, generalised to unequal n (replicate r of n at
    (r - 0.5)/n), so the 5 L1 flights spread over the batch. Every
