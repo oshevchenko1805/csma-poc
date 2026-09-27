@@ -25,6 +25,7 @@ def _summary(attack="gps_spoofing", policy="detect_only", rate=0.0006667,
             "attack_name": attack, "recovery_settings": {"policy": policy},
             "attack_evidence": {} if attack == "none" else {"gps_spoofing": ev},
             "range_source": {"model": "simulated_uwb", "seed": seed},
+            "trajectory_stats": {"samples_written": 1000, "on_sample_errors": 0},
             "error": error}
 
 
@@ -147,6 +148,17 @@ def test_exclusion_reasons(kw, needle):
 def test_excluded_when_spoof_not_seen_in_gps():
     r = _flight(_summary(), _l1_events(), spoof_m=3.0)
     assert not r["included"] and "injection not observed" in r["exclusion_reason"]
+
+
+@pytest.mark.parametrize("attack", ["gps_spoofing", "none"])
+def test_excluded_without_truth_feed(attack):
+    s = _summary(attack=attack)
+    s["trajectory_stats"] = None
+    r = _flight(s, _l1_events())
+    assert not r["included"] and "truth feed" in r["exclusion_reason"]
+    truth, belief, vel, gps = _series()
+    r = h3.analyse_flight(_summary(attack=attack), _l1_events(), [], belief, vel, gps)
+    assert not r["included"] and "truth feed" in r["exclusion_reason"]
 
 
 def test_outcomes_never_exclude():

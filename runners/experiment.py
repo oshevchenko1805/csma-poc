@@ -166,7 +166,18 @@ class RunResult:
     hold no mesh, so this is zeros there by construction. None means
     the run died before a fleet existed — not observed, not "no
     traffic"."""
+    range_source: Optional[dict[str, Any]] = None
+    """B1 (H3): the inter-UAV range source's parameters and seed
+    (describe()). None = no range source (v1)."""
     error: Optional[str] = None
+
+
+def describe_range_source(source: Optional[Any]) -> Optional[dict[str, Any]]:
+    """source.describe() for run_summary; None when there is no source
+    (v1) or it cannot describe itself."""
+    if source is None or not hasattr(source, "describe"):
+        return None
+    return dict(source.describe())
 
 
 class ExperimentRunner:
@@ -697,6 +708,11 @@ class ExperimentRunner:
             "enabled": self._arch_cfg.recovery.enabled,
             "policy": self._arch_cfg.recovery.policy,
         }
+        range_source_info: Optional[dict[str, Any]] = None
+        try:
+            range_source_info = describe_range_source(self._range_source)
+        except Exception as exc:
+            error = error or f"range_source: {exc}"
         result = RunResult(
             architecture=self._arch_cfg.architecture,
             run_id=self._run_id,
@@ -721,6 +737,7 @@ class ExperimentRunner:
             recovery_settings=recovery_settings,
             flight_modes=flight_modes,
             attack_evidence=attack_evidence,
+            range_source=range_source_info,
             error=error,
         )
 

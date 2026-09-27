@@ -19,11 +19,13 @@ Every t_* below is relative to t0. Window W = 120 s.
 
 Inclusion (per flight; an outcome is NEVER a reason to exclude)
 --------------------------------------------------------------
-attack flights:  no run error; t_target_set present; spoof rate
+all flights:     no run error; the Gazebo truth feed ran (trajectory_stats
+                 samples_written > 0 and uav_0's track not empty): the
+                 range source and harm both depend on it.
+attack flights:  t_target_set present; spoof rate
                  confirmed by read-back (rate_confirmed is True); the
                  GPS_RAW_INT offset against truth at the end of W is
                  >= 5 m (B0 spoof_offset_series, median over [W-1, W]).
-no-attack:       no run error.
 Excluded flights are listed with the reason and re-flown.
 
 Per-flight metrics (B0 definitions reused from metrics.spoof_rate_probe)
@@ -302,11 +304,19 @@ def _marker(events: list, phase: str) -> Optional[float]:
     return None
 
 
+def truth_feed_ok(summary: dict, truth: list) -> bool:
+    ts = summary.get("trajectory_stats") or {}
+    return bool(ts.get("samples_written")) and bool(truth)
+
+
 def exclusion_reason(summary: dict, is_attack: bool,
-                     spoof_end_m: Optional[float]) -> Optional[str]:
+                     spoof_end_m: Optional[float],
+                     truth_ok: bool = True) -> Optional[str]:
     """Pre-registered inclusion; None = included. Never looks at outcomes."""
     if summary.get("error"):
         return f"run error: {summary['error']}"
+    if not truth_ok:
+        return "no Gazebo truth feed: ranges and harm unmeasurable"
     if not is_attack:
         return None
     ev = gps_evidence(summary)
@@ -343,6 +353,7 @@ def analyse_flight(summary: dict, events: list, truth: list, belief: list,
         "window_short_s": (max(0.0, t0 + WINDOW_S - t_end)
                            if (t0 is not None and t_end is not None) else None),
         "config_problems": config_problems(summary, events),
+        "on_sample_errors": (summary.get("trajectory_stats") or {}).get("on_sample_errors"),
     }
     alarms = ranging_alarms(events)
     spoof_end = None
@@ -350,7 +361,8 @@ def analyse_flight(summary: dict, events: list, truth: list, belief: list,
         spoof = spoof_offset_series(gps, truth, t0)
         spoof_end = value_at(spoof, WINDOW_S - 1.0, 1.0)
     row["spoof_at_window_end_m"] = spoof_end
-    reason = exclusion_reason(summary, is_attack, spoof_end)
+    reason = exclusion_reason(summary, is_attack, spoof_end,
+                              truth_feed_ok(summary, truth))
     row["included"] = reason is None
     row["exclusion_reason"] = reason
     if not is_attack:

@@ -407,7 +407,11 @@ attack flights).
      use the marker.
    - Inclusion also requires t_target_set present and rate_confirmed
      True (OFF_R read back = requested rate). Both are setup checks, not
-     outcomes; otherwise the flight's level is unknown.
+     outcomes; otherwise the flight's level is unknown. Every flight
+     (attack or not) also needs the Gazebo truth feed (trajectory_stats
+     samples_written > 0, uav_0's track not empty): without it the range
+     source returns nothing, ranging stays silent by construction, and
+     harm is unmeasurable.
    - misattributions: ranging alarms naming uav_1/uav_2 in [0, W].
      Ranging alarms before t0 in attack flights are reported separately
      and do not enter the decision; false_alarms = every ranging alarm

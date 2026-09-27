@@ -30,6 +30,10 @@ Examples
         --target-uav uav_1 --attack-at-sec 20 \\
         --observation-after-attack-sec 30
 
+    # B1 / H3: architecture C + ranging, 1 m/s spoof (level L1)
+    python scripts/run_one.py --arch c_ranging --attack gps_spoofing \\
+        --spoof-rate 0.0006667 --recovery-policy detect_only
+
 Exit code
 ---------
     0  — run completed cleanly (result.error is None)
@@ -42,6 +46,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+import zlib
 from dataclasses import replace
 from pathlib import Path
 from typing import Callable
@@ -71,6 +76,10 @@ from enforcement.handlers import ExternalAwareProcessRunner  # noqa: E402
 from runners.experiment import ExperimentRunner  # noqa: E402
 from runners.mission_mavsdk import MavsdkMissionRunner  # noqa: E402
 from runners.missions import MissionRunner, NullMissionRunner  # noqa: E402
+from detectors.range_source import (  # noqa: E402
+    SimulatedUwbRangeSource,
+    TruthBuffer,
+)
 
 
 CONFIGS_DIR = REPO_ROOT / "configs"
@@ -156,6 +165,67 @@ ATTACK_FACTORIES: dict[str, Callable[[], AttackInjector]] = {
 }
 
 
+GPS_SPOOF_KW: dict = {"param_name": "SIM_GPS_OFF_N", "spoofed_value": 50.0}
+"""The gps_spoofing parameters of the factories above (test-guarded)."""
+
+
+def build_attack(name: str, *, spoof_rate: float | None = None) -> AttackInjector:
+    """Injector for `name`. spoof_rate=None -> the v1 factory, untouched.
+
+    With a spoof rate (B1, H3 "Attack"), every GpsSpoofingInjector in the
+    attack is replaced by one that also sets SIM_GPS_OFF_R; other children
+    of a composite and the composite's name are kept.
+    """
+    inj = ATTACK_FACTORIES[name]()
+    if spoof_rate is None:
+        return inj
+    if "gps_spoofing" not in name.split("+"):
+        raise ConfigError(
+            f"--spoof-rate needs an attack with gps_spoofing; got {name!r}")
+
+    def with_rate(child: AttackInjector) -> AttackInjector:
+        if isinstance(child, GpsSpoofingInjector):
+            return GpsSpoofingInjector(**GPS_SPOOF_KW, spoof_rate=spoof_rate)
+        return child
+
+    if isinstance(inj, SequentialAttackInjector):
+        return SequentialAttackInjector(
+            [with_rate(c) for c in inj.children], name=inj.name)
+    return with_rate(inj)
+
+
+def needs_range_source(arch_cfg) -> bool:
+    """True iff the configuration lists the ranging detector (config-driven,
+    no architecture branch)."""
+    return any("ranging" in m.detectors for m in arch_cfg.monitors)
+
+
+def default_range_seed(run_id: str) -> int:
+    """Per-flight UWB noise seed derived from the run id: fixed per flight,
+    reproducible offline, different between flights."""
+    return zlib.crc32(run_id.encode("utf-8")) & 0x7FFFFFFF
+
+
+def build_range_source(arch_cfg, seed: int):
+    """(TruthBuffer, SimulatedUwbRangeSource) when the config needs ranging,
+    else (None, None) = v1."""
+    if not needs_range_source(arch_cfg):
+        return None, None
+    buffer = TruthBuffer()
+    return buffer, SimulatedUwbRangeSource(buffer, seed)
+
+
+def make_trajectory_factory(mission_kind: str, truth_buffer=None):
+    """Recorder factory for real flights; None for the null mission. With a
+    truth buffer, every Gazebo sample is also fed to it (on_sample)."""
+    if mission_kind != "mavsdk":
+        return None
+    if truth_buffer is None:
+        return lambda out_path: TrajectoryRecorder(out_path=out_path)
+    return lambda out_path: TrajectoryRecorder(
+        out_path=out_path, on_sample=truth_buffer.add)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -236,8 +306,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--arch",
         required=True,
-        choices=["a", "b", "c"],
-        help="architecture code (a / b / c)",
+        choices=["a", "b", "c", "c_ranging"],
+        help=(
+            "architecture code (a / b / c); c_ranging = C + B1 ranging "
+            "detector (configs/architecture_c_ranging.yaml)"
+        ),
     )
     p.add_argument(
         "--attack",
@@ -345,17 +418,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "(proportionate)."
         ),
     )
+    p.add_argument(
+        "--spoof-rate",
+        type=float,
+        default=None,
+        help=(
+            "SIM_GPS_OFF_R for gps_spoofing (B1 / H3 levels: L30 0.02, "
+            "L10 0.006667, L3 0.002, L1 0.0006667). Default: none (v1, "
+            "OFF_R untouched)."
+        ),
+    )
+    p.add_argument(
+        "--range-seed",
+        type=int,
+        default=None,
+        help=(
+            "UWB noise seed for the ranging detector (only with a config "
+            "that lists ranging). Default: derived from the run id."
+        ),
+    )
     return p.parse_args(argv)
 
 
 # ---------------------------------------------------------------------------
 # Component builders
 # ---------------------------------------------------------------------------
-
-
-def build_attack(name: str) -> AttackInjector:
-    factory = ATTACK_FACTORIES[name]
-    return factory()
 
 
 def build_mission(
@@ -519,7 +606,20 @@ def main(argv: list[str] | None = None) -> int:
     log_root = Path(args.log_root).resolve()
     log_root.mkdir(parents=True, exist_ok=True)
 
-    attack = build_attack(args.attack)
+    attack = build_attack(args.attack, spoof_rate=args.spoof_rate)
+
+    # B1 (H3): range source fed by the Gazebo truth recorder, only when the
+    # configuration lists the ranging detector. v1 configs -> (None, None).
+    truth_buffer, range_source = build_range_source(
+        arch_cfg,
+        args.range_seed if args.range_seed is not None
+        else default_range_seed(run_id),
+    )
+    if range_source is not None and args.mission != "mavsdk":
+        raise ConfigError(
+            "the ranging detector needs the Gazebo truth feed: "
+            "use --mission mavsdk"
+        )
 
     # ExperimentRunner timing defaults — needed for null-mission duration calc.
     effective_attack_at = (
@@ -556,11 +656,7 @@ def main(argv: list[str] | None = None) -> int:
     # monitors get stopped by the takeout attacks and PX4's own estimate is
     # corrupted by GPS spoofing by construction, so physical consequence
     # (drift, mission progress, formation geometry) is measurable only here.
-    trajectory_factory = (
-        (lambda out_path: TrajectoryRecorder(out_path=out_path))
-        if args.mission == "mavsdk"
-        else None
-    )
+    trajectory_factory = make_trajectory_factory(args.mission, truth_buffer)
 
     runner = ExperimentRunner(
         arch_cfg=arch_cfg,
@@ -572,6 +668,7 @@ def main(argv: list[str] | None = None) -> int:
         target_uav=args.target_uav,
         process_runner=process_runner,
         trajectory_recorder_factory=trajectory_factory,
+        range_source=range_source,
         **extra,
     )
 
@@ -586,6 +683,10 @@ def main(argv: list[str] | None = None) -> int:
         if trajectory_factory is not None
         else "trajectory: OFF (no simulator in this mission mode)"
     )
+    if range_source is not None:
+        _log(f"range source: {range_source.describe()}")
+    if args.spoof_rate is not None:
+        _log(f"spoof rate (SIM_GPS_OFF_R): {args.spoof_rate}")
     if isinstance(mission, MavsdkMissionRunner):
         _log(f"mavsdk endpoints: {mission._endpoints}")
     else:
