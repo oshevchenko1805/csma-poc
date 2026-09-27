@@ -263,6 +263,8 @@ class Monitor:
         self._mesh = mesh
         self._cross_check = cross_check
         self._ranging = ranging
+        # Set by disable_local_detectors (detector_takeout, B1 item 6).
+        self._ranging_disabled: bool = False
 
         self._logger = EventLogger(log_path)
 
@@ -376,6 +378,12 @@ class Monitor:
         via cross_check on the still-published peer positions; in A/B
         there is no such second opinion.
 
+        B1 (H3_PREREGISTRATION.md): the ranging detector on this monitor
+        is silenced too, both paths. It runs on the node's own position
+        and range measurements, so it counts as node-local detection. The
+        peers' ranging instances are untouched. Without ranging (v1) this
+        changes nothing.
+
         Telemetry recording is deliberately NOT disabled: the listener is
         untouched by this attack, so the recorded series shows exactly
         what the silenced detector would have seen. That is the mechanism
@@ -383,6 +391,7 @@ class Monitor:
         """
         with self._detector_lock:
             self._detectors = []
+            self._ranging_disabled = True
 
     def __enter__(self) -> "Monitor":
         self.start()
@@ -436,6 +445,11 @@ class Monitor:
     def ranging(self) -> Optional[RangingConsistencyDetector]:
         return self._ranging
 
+    @property
+    def ranging_active(self) -> bool:
+        """True iff a ranging detector is wired and not taken out."""
+        return self._ranging is not None and not self._ranging_disabled
+
     # ----- callbacks -----
 
     def _on_telemetry(self, event: TelemetryEvent) -> None:
@@ -449,7 +463,8 @@ class Monitor:
             if pos is not None and self._ranging is not None:
                 with self._detector_lock:
                     try:
-                        self._ranging.feed_own_position(*pos)
+                        if not self._ranging_disabled:
+                            self._ranging.feed_own_position(*pos)
                     except Exception:
                         self._n_handler_errors += 1
 
@@ -486,7 +501,7 @@ class Monitor:
                     result = None
                 if result is not None:
                     self._emit_security(result)
-            if self._ranging is not None:
+            if self._ranging is not None and not self._ranging_disabled:
                 try:
                     results = self._ranging.feed_peer_position(announcement)
                 except Exception:

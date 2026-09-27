@@ -54,6 +54,11 @@ Mechanics
            stop(), it joins no threads.
 - cleanup(): no-op. The detectors stay disabled for the rest of the
            run by design; the run then tears down normally.
+
+B1 (H3_PREREGISTRATION.md, P-B1-3): where the configuration wires the
+ranging detector, disable_local_detectors() also silences the target
+monitor's ranging instance (its self path); the peers' ranging instances
+keep running. Nothing changes here: the monitor owns that rule.
 """
 
 from __future__ import annotations
