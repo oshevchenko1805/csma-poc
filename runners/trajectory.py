@@ -58,6 +58,11 @@ Design
 - Writes to its own file (`trajectory.jsonl`). It does NOT touch
   core.events, core.logger or merged.jsonl, so the event schema and the
   existing analyzer are untouched.
+- Optional `on_sample(uav_id, t_wall, x, y, z)` callback (B1, H3): the
+  same samples, in memory, for the simulated inter-UAV range source
+  (detectors/range_source.py). Default None = v1 behaviour. A failing
+  callback is counted (stats["on_sample_errors"], present only when a
+  callback is set) and never stops the recording.
 
 Source exhaustion vs stop()
 ---------------------------
@@ -145,6 +150,7 @@ class TrajectoryRecorder:
         sample_hz: float = DEFAULT_SAMPLE_HZ,
         model_to_uav: Callable[[str], Optional[str]] = default_model_to_uav,
         clock: Callable[[], float] = time.time,
+        on_sample: Optional[Callable[[str, float, float, float, float], None]] = None,
     ) -> None:
         if sample_hz <= 0:
             raise ValueError("sample_hz must be positive")
@@ -173,6 +179,9 @@ class TrajectoryRecorder:
             "parse_errors": 0,
             "source_errors": 0,
         }
+        self._on_sample = on_sample
+        if on_sample is not None:
+            self.stats["on_sample_errors"] = 0
 
     # ----- lifecycle -----
 
@@ -298,6 +307,11 @@ class TrajectoryRecorder:
                 self._fh.write(json.dumps(rec) + "\n")
             self.stats["samples_written"] += 1
             wrote = True
+            if self._on_sample is not None:
+                try:
+                    self._on_sample(uav_id, now, rec["x"], rec["y"], rec["z"])
+                except Exception:
+                    self.stats["on_sample_errors"] += 1
 
         if wrote:
             self._last_sample_t = now
