@@ -443,6 +443,41 @@ attack flights).
    flight has its own replicate number; a re-flown excluded flight gets
    the next free number of its cell.]
 
+10. Ranging health counters and one technical flight (written
+    before any B1 flight, 2026-09-27).
+    [Counters (d54a2ca): RangingConsistencyDetector.stats and
+    Monitor.stats `ranging_evaluated`, `ranging_no_own_position`,
+    `ranging_no_range` (per peer announcement; the two skip counters are
+    independent). Setup diagnostics, not outcomes.
+    Technical flight: exactly one, L30, before the series, in its own
+    root, so it can never enter the H3 analysis (which reads runs_h3):
+      python3 scripts/run_batch.py
+        --cells C_RANGING/gps_spoofing:L30@detect_only -n 1
+        --attack-at-sec 90 --observation-after-attack-sec 125
+        --altitude-layer-step 5 --log-root runs_h3_smoke
+    Read ONLY these setup fields (run_summary and the attack phase
+    markers), with a script that prints nothing else:
+      - error is null; range_source present with a seed;
+      - attack_evidence.gps_spoofing: t_target_set present,
+        rate_confirmed True, spoof_rate = 0.02;
+      - trajectory_stats: samples_written > 0, on_sample_errors = 0,
+        uav_0's truth track not empty (row count only);
+      - every monitor (3): ranging_evaluated > 0,
+        ranging_evaluated / (evaluated + no_own_position + no_range)
+        >= 0.95, handler_errors = 0;
+      - window_short_s = 0 (t_target_set + 120 s <= inject_end).
+    NOT read before S1-S3 are complete: security events of any detector,
+    alarm times, targets, residuals, harm, the GPS offset series, the
+    trajectory itself. The flight's data never enter theta, the
+    predictions or the decision; its raw run goes into an archive with
+    SHA-256, unread.
+    PASS on every field -> `run_batch --preset h3 --log-root runs_h3`.
+    FAIL -> fix the setup (additive code, tests), re-fly in the same
+    root with -n 2 (resume skips r1), same fields, same criteria.
+    This is the first B1 flight: from it on, every change to this file
+    (a rule, or a setup fix that leaves the rules unchanged) goes into
+    Amendments with a date.]
+
 ## Amendments
 
 (none)
