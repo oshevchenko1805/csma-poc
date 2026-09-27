@@ -10,17 +10,24 @@ runs_campaign/campaign_master.csv     recovery success, MTTR, phase and
                                       geometry excess (unchanged metrics)
 runs_campaign/collision_flags.csv     metrics.collision_flags (sensitivity
                                       only; main tables use ALL valid runs)
+runs_campaign/stage3_h2_rows.json     metrics.h2_analysis rows of the stage-3
+                                      H2 campaign (table 4.7, panel B)
 
 What changed against the draft
 ------------------------------
-4.6  Recovery Success / MTTR / Stabilisation Level for GPS cells measured
+4.7  (was 4.6 in the draft) Panel A (thesis-campaign-v1, A/B/C). Recovery Success / MTTR / Stabilisation Level for GPS cells measured
      "growth of route distance stopped", which for A/B is the 50 m spoof
      ceiling. Replaced by navigation integrity (estimate jump, nav error)
      and what the response physically held (drift after response).
-4.7  Mission Degradation (distance to the route LINE) replaced by mission
+     Panel B (stage 3, C only): current vs improved recovery rule vs
+     detection only; verdict numbers via metrics.h2_analysis.verdict, so
+     the table cannot drift from the pre-registered decision rule.
+4.6  (was 4.7 in the draft) Mission Degradation (distance to the route LINE) replaced by mission
      execution (corners reached vs clean flight). Route distance is kept
      only where the estimate is not attacked (command injection, comm
      disruption) — there it is a physical displacement.
+Table numbers 4.6/4.7 were swapped against the draft so that numbering
+follows first mention in the rewritten Ch. 4 text (thesis_text/CH4_V2_TEXT.md).
 4.8  Phase/Geometry Excess unchanged (truth-based); the Mission
      Degradation column is replaced by drift after response and mission
      execution.
@@ -36,6 +43,8 @@ from __future__ import annotations
 
 import argparse
 import collections
+import json
+import os
 
 from metrics.plots import flag, load, num, quartiles, valid_rows
 from metrics.stats import fisher_exact, wilson_bounds
@@ -43,6 +52,7 @@ from metrics.stats import fisher_exact, wilson_bounds
 PHYS = "runs_campaign/physical_outcomes.csv"
 MASTER = "runs_campaign/campaign_master.csv"
 FLAGS = "runs_campaign/collision_flags.csv"
+H2_ROWS = "runs_campaign/stage3_h2_rows.json"
 
 ARCHS = ("A", "B", "C")
 GPS_CELLS = ("gps_spoofing", "monitor_takeout+gps_spoofing",
@@ -88,11 +98,13 @@ def col(rows: list, key: str) -> list:
     return [num(r, key) for r in rows]
 
 
-# ---------------------------------------------------------------- 4.6
+# ---------------------------------------------------------------- 4.7 (GPS: navigation integrity)
 
-def table_4_6(phys: dict) -> list:
+def table_nav_integrity(phys: dict, h2_rows: list = None) -> list:
     out = [
-        "**Таблиця 4.6. Навігаційна цілісність і фізичний результат реагування за GPS-пов'язаних атак**",
+        "**Таблиця 4.7. Навігаційна цілісність і фізичний результат реагування за GPS-пов'язаних атак**",
+        "",
+        "**Панель A. Основна кампанія: архітектури A, B, C**",
         "",
         "| Сценарій | Арх. | n | Стрибок оцінки позиції, с | Помилка навігації наприкінці вікна, м | Перша дія реагування, с | Знос після реагування, м | Виконання місії |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -117,21 +129,84 @@ def table_4_6(phys: dict) -> list:
                 fmt_q(col(rs, "post_response_drift_m"), with_n=False)
                 if acts else "—",
                 fmt_med(col(rs, "mission_execution"))))
-    out += ["",
-            "Примітки. Стрибок оцінки — перший момент після початку атаки, коли |оцінка − істина| > 25 м. "
-            "Помилка навігації — медіана |оцінка − істина| за останні 10 с вікна 60 с. "
-            "Знос після реагування — найбільша відстань (істина Gazebo) від точки, де апарат був у момент підтвердження дії утримання. "
-            "Виконання місії — частка кутових точок маршруту, пройдених у вікні, відносно чистого польоту тієї ж архітектури. "
-            "н/д: оцінку позиції не записано (монітор вимкнено атакою).",
-            ""]
+    notes = ("Примітки. Стрибок оцінки — перший момент після початку атаки, коли |оцінка − істина| > 25 м. "
+             "Помилка навігації — медіана |оцінка − істина| за останні 10 с вікна 60 с. "
+             "Знос після реагування — найбільша відстань (істина Gazebo) від точки, де апарат був у момент підтвердження дії утримання. "
+             "Виконання місії — частка кутових точок маршруту, пройдених у вікні, відносно польоту без атаки тієї ж архітектури. "
+             "н/д: оцінку позиції не записано (монітор вимкнено атакою).")
+    if h2_rows:
+        out += [""] + table_h2_panel(h2_rows)
+        notes += (" Панель B: окрема кампанія, лише архітектура C, апарати на різних висотах (крок 5 м); "
+                  "з панеллю A її пов'язує плече «чинне правило», яке відтворює C основної кампанії. "
+                  "Кутові точки — кількість кутів маршруту, пройдених у вікні 60 с (у польоті без атаки — близько 7). "
+                  "Перевірка H2 — за правилом, зафіксованим до першого прогону: однобічний критерій Манна–Вітні "
+                  "з поправкою Holm на дві підтверджувальні комірки та медіана зносу ≤ 7.91 м; "
+                  "комірка detector takeout — описова (різниця медіан, bootstrap 95% ДІ).")
+    out += ["", notes, ""]
     return out
 
 
-# ---------------------------------------------------------------- 4.7
+RULE_UA = {"proportionate": "чинне (LOITER)",
+           "trust_aware": "удосконалене (нульова швидкість)",
+           "detect_only": "лише виявлення"}
 
-def table_4_7(phys: dict, master: dict) -> list:
+
+def _sci(p: float) -> str:
+    m, e = ("%.1e" % p).split("e")
+    sup = str.maketrans("-0123456789", "⁻⁰¹²³⁴⁵⁶⁷⁸⁹")
+    return "%s·10%s" % (m, str(int(e)).translate(sup))
+
+
+def table_h2_panel(h2_rows: list) -> list:
+    from metrics.h2_analysis import ARMS, BOUND_M, CONFIRMATORY_CELLS, verdict
+    v = verdict(h2_rows)
+    inc = [r for r in h2_rows if r["included"]]
     out = [
-        "**Таблиця 4.7. Виконання місії за типом атаки й архітектурою**",
+        "**Панель B. Перевірочна кампанія H2: архітектура C, чинне й удосконалене правило відновлення**",
+        "",
+        "| Сценарій | Правило відновлення | n | Стрибок оцінки позиції, с | Помилка навігації наприкінці вікна, м | Дія, с (підтверджено) | Знос після реагування, м | Кутові точки у вікні | Перевірка H2 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for a in GPS_CELLS:
+        info = v["cells"].get(a, {})
+        for arm in ARMS:
+            rs = [r for r in inc if r["attack"] == a and r["policy"] == arm]
+            if arm == "detect_only":
+                act, drift = "немає", "—"
+            else:
+                ok = [r for r in rs if r.get("action_ok")]
+                act = "%s (%d/%d)" % (fmt_med([r.get("t_action_s") for r in ok]),
+                                      len(ok), len(rs))
+                drift = fmt_q([r.get("drift_itt_m") for r in rs], with_n=False)
+            check = "—"
+            if arm == "trust_aware":
+                if a in CONFIRMATORY_CELLS:
+                    check = "p(Holm) = %s; медіана ≤ %.2f м: %s → %s" % (
+                        _sci(info["p_holm"]), BOUND_M,
+                        "так" if info["median_trust_m"] <= BOUND_M else "ні",
+                        "прийнято" if info["accepted"] else "не прийнято")
+                else:
+                    d, lo, hi = info["diff_median_ci"]
+                    check = ("описово: Δ медіан %.1f [%.1f; %.1f] м" % (d, lo, hi)).replace("-", "−")
+            out.append("| %s | %s | %d | %s | %s | %s | %s | %s | %s |" % (
+                UA[a], RULE_UA[arm], len(rs),
+                fmt_q([r.get("t_estimate_jump_s") for r in rs], with_n=False),
+                fmt_med([r.get("nav_error_end_m") for r in rs]),
+                act, drift,
+                fmt_med([r.get("waypoints_captured") for r in rs], nd=0),
+                check))
+    out.append("")
+    out.append("Висновок за заздалегідь зафіксованим правилом: H2 %s." % (
+        {"CONFIRMED": "підтверджено", "PARTIAL": "підтверджено частково",
+         "NOT CONFIRMED": "не підтверджено"}[v["H2"]]))
+    return out
+
+
+# ---------------------------------------------------------------- 4.6 (mission execution)
+
+def table_mission(phys: dict, master: dict) -> list:
+    out = [
+        "**Таблиця 4.6. Виконання місії за типом атаки й архітектурою**",
         "",
         "**Панель A. Виконання місії, медіана [IQR]; повне виконання, k/n**",
         "",
@@ -156,7 +231,7 @@ def table_4_7(phys: dict, master: dict) -> list:
     fis = []
     for other in ("A", "B"):
         ko, no = kn("command_injection", other)
-        fis.append("C−%s: p = %.1e" % (other, fisher_exact(kc, nc - kc, ko, no - ko)))
+        fis.append("C−%s: p = %s" % (other, _sci(fisher_exact(kc, nc - kc, ko, no - ko))))
 
     out += ["",
             "**Панель B. Command injection: відновлення і фізичне відхилення від маршруту**",
@@ -173,10 +248,10 @@ def table_4_7(phys: dict, master: dict) -> list:
             fmt_q(col(ms, "mttr_functional_s"), nd=3) if k else "не визначено",
             fmt_q(col(phys.get(("command_injection", arch), []), "route_distance_m"), with_n=False)))
     out += ["",
-            "Примітки. Повне виконання — виконання місії ≥ 1.00 (стільки ж кутових точок, скільки в чистому польоті). "
+            "Примітки. Повне виконання — виконання місії ≥ 1.00 (стільки ж кутових точок, скільки в польоті без атаки). "
             "Точний тест Фішера для повного виконання за command injection: %s. "
             "Відстань до маршруту наведено лише для command injection, де оцінка стану не атакована і відстань є фізичним відхиленням; "
-            "за GPS-атак вона не характеризує фізичне зміщення (див. табл. 4.6)." % "; ".join(fis),
+            "за GPS-атак вона не характеризує фізичне зміщення (див. табл. 4.7)." % "; ".join(fis),
             ""]
     return out
 
@@ -219,7 +294,7 @@ def table_4_8(phys: dict, master: dict, flags: dict) -> list:
             thr, len(tail), len(vals), coll, len(tail)))
     out += ["",
             "Примітки. Phase Excess і Geometry Excess обчислено за істинними положеннями Gazebo і не залежать від атакованої оцінки. "
-            "Панель контрастів із чернетки (bootstrap C−A, C−B для Phase/Geometry Excess) не змінюється і переноситься без змін.",
+            "Хвости розподілів у польотах без атаки зіставлено з прогонами, де сталося зіткнення апаратів (див. табл. Д.1).",
             ""]
     return out
 
@@ -254,15 +329,21 @@ def table_sensitivity(phys: dict, flags: dict) -> list:
     return out
 
 
-def build(phys_csv: str = PHYS, master_csv: str = MASTER, flags_csv: str = FLAGS) -> str:
+def build(phys_csv: str = PHYS, master_csv: str = MASTER, flags_csv: str = FLAGS,
+          h2_json: str = H2_ROWS) -> str:
     phys = cells(load(phys_csv))
+    h2_rows = None
+    if h2_json and os.path.exists(h2_json):
+        with open(h2_json) as fh:
+            h2_rows = json.load(fh)
     master = cells(valid_rows(load(master_csv)))
     flags = {r["run_id"]: flag(r, "collision_fall") for r in load(flags_csv)}
     lines = ["# Розділ 4 — таблиці на фізичних метриках (P1)",
              "",
              "Згенеровано `python3 -m metrics.ch4_physical_tables`. Не редагувати вручну.",
              ""]
-    lines += table_4_6(phys) + table_4_7(phys, master) + table_4_8(phys, master, flags)
+    # numbering follows first mention in the text: 4.6 mission, 4.7 GPS, 4.8 coordination
+    lines += table_mission(phys, master) + table_nav_integrity(phys, h2_rows) + table_4_8(phys, master, flags)
     lines += table_sensitivity(phys, flags)
     return "\n".join(lines) + "\n"
 

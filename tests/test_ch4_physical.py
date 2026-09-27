@@ -1,7 +1,7 @@
 """metrics.collision_flags + metrics.ch4_physical_tables (review P1, stage 4)."""
 import csv
 
-from metrics.ch4_physical_tables import build, fmt_q
+from metrics.ch4_physical_tables import _sci, build, fmt_q, table_h2_panel
 from metrics.collision_flags import collision_falls, fall_times
 
 
@@ -72,3 +72,62 @@ def test_build_smoke(tmp_path):
     assert "Таблиця 4.6" in md and "Таблиця 4.7" in md and "Таблиця 4.8" in md
     assert "LOITER, 3.00 (1/1)" in md
     assert "Таблиця Д.1" in md
+
+
+def _h2_row(attack, policy, drift, i):
+    acting = policy != "detect_only"
+    return {"run_id": "%s_%s_%d" % (attack, policy, i), "policy": policy,
+            "attack": attack, "included": True, "action_ok": acting,
+            "t_action_s": 3.0 if acting else None,
+            "drift_itt_m": drift if acting else None,
+            "t_estimate_jump_s": 7.5, "nav_error_end_m": 50.0,
+            "waypoints_captured": 1 if acting else 2}
+
+
+def _h2_rows(trust_drift):
+    rows = []
+    for a in ("gps_spoofing", "monitor_takeout+gps_spoofing",
+              "detector_takeout+gps_spoofing"):
+        for i in range(8):
+            rows.append(_h2_row(a, "proportionate", 50.0 + 0.01 * i, i))
+            rows.append(_h2_row(a, "trust_aware", trust_drift + 0.01 * i, i))
+            rows.append(_h2_row(a, "detect_only", None, i))
+    return rows
+
+
+def test_panel_b_accepts_small_drift_and_reports_verdict():
+    md = "\n".join(table_h2_panel(_h2_rows(1.5)))
+    assert "Панель B" in md
+    assert md.count("→ прийнято") == 2          # two confirmatory cells
+    assert "описово: Δ медіан −" in md           # detector takeout, no test
+    assert "H2 підтверджено." in md
+    assert "3.00 (8/8)" in md
+
+
+def test_panel_b_rejects_when_median_above_bound():
+    # significantly smaller than LOITER, but above the 7.91 m bound
+    md = "\n".join(table_h2_panel(_h2_rows(20.0)))
+    assert md.count("→ не прийнято") == 2
+    assert "H2 не підтверджено." in md
+
+
+def test_sci_format():
+    assert _sci(3.7e-06) == "3.7·10⁻⁶"
+
+
+def test_build_without_h2_has_no_panel_b(tmp_path):
+    phys = [{"run_id": "r1", "architecture": "C", "attack": "gps_spoofing",
+             "nav_error_end_m": "50", "nav_error_peak_m": "50",
+             "t_estimate_jump_s": "7.5", "t_first_response_s": "3.0",
+             "first_response_action": "mode_loiter",
+             "post_response_drift_m": "50", "route_distance_m": "19.7",
+             "waypoints_captured": "2", "mission_execution": "0.29"}]
+    master = [{"run_id": "r1", "architecture": "C", "attack": "gps_spoofing",
+               "valid": "True", "degradation_stopped": "True",
+               "mttr_functional_s": "16", "phase_excess_m": "145",
+               "geometry_excess_m": "52"}]
+    flags = [{"run_id": "r1", "collision_fall": "False"}]
+    p, m, f = tmp_path / "p.csv", tmp_path / "m.csv", tmp_path / "f.csv"
+    _write(p, phys), _write(m, master), _write(f, flags)
+    md = build(str(p), str(m), str(f), h2_json=None)
+    assert "Панель A" in md and "Панель B. Перевірочна" not in md
