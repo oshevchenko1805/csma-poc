@@ -1,9 +1,11 @@
 # H3 — pre-registration (review stage 5, step 2; B1: inter-UAV ranging)
 
-Status: 2a + 2b (2026-09-27). The design, rules and predictions are
-fixed here. The [2b] numbers were computed from data that existed before
-B1 (the B0 series and the stage-3 flights) by `scripts/h3_predict_2b.py`,
-and are frozen **before any B1 flight**. Once the first B1 flight is
+Status: 2a + 2b + 2c (2026-09-27). The design, rules and predictions
+are fixed here. [2c] changed the attribution rule before any B1 code or
+flight (section "Attribution check [2c]"). The [2b] numbers were
+computed from data that existed before B1 (the B0 series and the
+stage-3 flights) by `scripts/h3_predict_2b.py`, and are frozen **before
+any B1 flight**. Once the first B1 flight is
 flown, any rule change goes to "Amendments", dated and with a reason,
 and the original rule's result is still reported. The executable form of
 the rules, `metrics/h3_analysis.py` (+ tests), is committed before the
@@ -66,19 +68,71 @@ cadence; **no new mesh messages**):
   cross_check.
 
 Attribution (the residual is symmetric: it cannot say which end is
-wrong):
+wrong). [2c; changed before any B1 code or flight, reason below.]
 
-- bad_ij, and bad_ik is false for some other peer k: flag **j**.
+- **fine_ik**: |rho_ik| ≤ theta_ok for k = 3 consecutive announcements,
+  theta_ok = 1.3 m. "Fine" is positive evidence of consistency, not the
+  mere absence of a sustained alarm.
+- bad_ij, and fine_ik for some other peer k: flag **j**.
 - bad_ij for **every** peer (≥ 2 peers): flag **i itself** (self-check:
   "my own position is inconsistent with everyone").
+- **Latch:** once monitor i has flagged itself, it flags no peer for the
+  rest of the flight. Its own position p̂_i is then known to be tainted,
+  and every peer judgement it could make is computed from p̂_i. The self
+  flag itself keeps the hysteresis above.
 - Only one peer is heard and bad_ij: no flag (ambiguous; with 3 UAVs
   this happens only if a peer is silent).
+- (2a rule, replaced: flag j if bad_ij and **not** bad_ik; no latch.)
 
 With 3 UAVs and victim uav_0, the predicted pattern is: uav_1 and uav_2
 flag uav_0 (the peer path, running outside the victim's failure domain),
 and uav_0 flags itself (the self path, running in the victim's domain).
 **3 is the minimum group size for attribution**, which is stated as a
 limit.
+
+### Attribution check [2c] (before any B1 code or flight)
+
+Step 2b modelled the peers' view of the victim and the victim's self
+path, but not what the victim's **own** monitor concludes about its
+peers. Its p̂_i is the victim's EKF position (tainted). With the 5 m
+layers, uav_1 is ~5 m and uav_2 ~10 m above the victim, so the pair
+0–1 crosses theta ~1 s before the pair 0–2. In between, the victim's
+monitor sees "bad with uav_1, not bad with uav_2", and the 2a rule flags
+uav_1. Later in the lap, when the victim's error is perpendicular to the
+line of sight to uav_2, the pair 0–2 is genuinely consistent again; no
+threshold can resolve that from two residuals.
+
+`scripts/h3_predict_2c.py` re-runs the 2b model (same data, geometries,
+B0 e(t), theta and peer-path seed keys) for all three monitors.
+Misattributions by the victim's monitor (misattributions by the peers'
+monitors are 0/5200 in every rule; no-attack flags are 0 in every rule):
+
+| rule for "fine" | L1 | L3 | L1 harm ≤ H_max |
+|---|---|---|---|
+| 2a: not bad | 5196/5200 | 4983/5200 | 5200/5200 |
+| 3× ≤ theta | 1367 | 363 | 5200 |
+| 3× ≤ 1.3 m | 816 (at 28 s) | 34 | 5200 |
+| 3× ≤ 0.9 m | 354 (at 28 s) | 0 | 5193 |
+| 2a + latch | 4274 | 4963 | 5200 |
+| 3× ≤ theta + latch | 1 | 362 | 5200 |
+| **3× ≤ 1.3 m + latch** | **0** | **34** | **5200** |
+| 3× ≤ 0.9 m + latch | 0 | 0 | 5193 (max 9.1 m) |
+
+L30 and L10: 0 misattributions in every rule except "not bad" (10, 11).
+
+Chosen: **theta_ok = 1.3 m + latch.** theta_ok is the calibration
+maximum of sustained honest |rho| (1.24 m, section "Threshold")
+rounded up to 0.1 m, i.e. theta without the 0.5 m margin, so it comes
+from the calibration rule rather than a free choice. The confirmatory
+cell L1 is clean in the model. The cost is a predicted misattribution by
+the victim's monitor at L3 in 0.65 % of model runs, before its self
+flag. θ/2 = 0.9 m was rejected: no derivation, and harm > H_max in 7/5200
+L1 runs.
+
+This rule was chosen on the same model that produces the predictions;
+the flights are the test. The model also assumes that all monitors
+receive announcements on the same whole-second ticks; live phases
+differ by up to 1 s.
 
 SecurityEvent detector `ranging` -> reason `ranging_anomaly`, which is
 added to every policy table:
@@ -137,11 +191,13 @@ range-noise realisations:
     s(t) = min(|rho(t)|, |rho(t-1)|, |rho(t-2)|)
     theta = max s(t), rounded up to 0.1 m, + 0.5 m
 
-**[2b] theta = 1.8 m**, from 130 of 131 runs. One run is gated
-(DT/trust_aware r1: sparse truth and belief). The max sustained |rho| is
-1.24 m, of which navigation alone is ≤ 0.47 m. By construction there are
-zero false alarms on the calibration set; false alarms are tested on the
-held-out B1 no-attack flights.
+**[2b] theta = 1.8 m**, from 130 of 131 runs. **[2c] theta_ok = 1.3 m**
+(the max sustained |rho| below, rounded up to 0.1 m, without the
+margin). One run is gated (DT/trust_aware r1: sparse truth and
+belief). The max sustained |rho| is 1.24 m, of which navigation alone
+is ≤ 0.47 m. By construction there are zero false alarms on the
+calibration set; false alarms are tested on the held-out B1 no-attack
+flights.
 
 **H_max = theta + 5 m = 6.8 m** (same form as the H2 bound: calibrated
 level + 5 m allowance for geometry and sustain).
@@ -249,8 +305,14 @@ gives the same median (5.8 m).
   8–9, range 7–10), with **harm_at_alarm = 5.8 m** (p5–p95 5.1–5.9,
   max 6.6). This is ≤ H_max = 6.8 m in 5200/5200 model runs, with a
   margin of ~1 m. uav_0 flags itself at 10 s (9–11). 0 misattributions.
+  **[2c, supersedes the line above; attribution rule with theta_ok and
+  latch, all three monitors]:** t_rng_peer = 9 s (p5–p95 8–10, range
+  7–10); harm_at_alarm = 5.9 m (p5–p95 5.1–6.6, max 6.6), ≤ H_max in
+  5200/5200, worst-case margin **0.2 m**; t_rng_self = 10 s (p5–p95
+  9–10, range 8–11); 0 misattributions on every monitor.
 - **L30, L10 (P-B1-2):** t_rng = t_jump + 2…3 s (model: 10 s; t_jump
-  7.3 / 7.7 s; 0/5200 alarms before t_jump − 0.5 s). gps fires first
+  7.3 / 7.7 s; 0/5200 alarms before t_jump − 0.5 s; [2c] rule: range
+  9–13 s, 0 misattributions). gps fires first
   (2.6 / 3.7 s). **Falsified** if t_rng < t_jump − 0.5 s in any flight.
   harm_at_alarm by the B0 definition is ≈ the jump (49 / 41 m). That is
   estimate error, not physical displacement at that moment, so it is not
@@ -259,6 +321,9 @@ gives the same median (5.8 m).
   (p5–p95 8–10), harm 3.7 m (3.6–3.9); the rest fire at the jump. Local
   gps fires earlier (B0: 5.7 s), so at L3 ranging adds value only when
   local detection is taken out.
+  [2c] With the chosen rule: t_rng_peer 8 s (p5–p95 8–11), harm 3.7 m;
+  the victim's monitor flags uav_1 or uav_2 at 6–7 s in 34/5200 model
+  runs (0.65 %), before its self flag. Peers' monitors: 0.
 - **DT + L1 (P-B1-3):** the peer path alone detects: t ≈ 9 s, harm ≈
   5.8 m, as at L1. The self path is silent (taken out).
 - **No-attack:** 0 ranging alarms.
@@ -311,11 +376,16 @@ attack flights).
   not flown).
 - 3 UAVs = the minimum for attribution. One spoof direction (north),
   one magnitude (50 m), one route.
+- The victim's own monitor judges its peers from its own tainted
+  position. Before its self flag, a victim/peer ambiguity remains; the
+  [2c] rule reduces it (predicted 0.65 % at L3, 0 at L1) but does not
+  remove it. After the self flag, the latch removes it.
 - SITL GNSS noise ≈ 0 live; noise enters only in the offline map.
 
 ## Implementation (after this file is committed; additive, defaults = v1, tests for each)
 
-1. `detectors/ranging.py`: detector + attribution (pure functions).
+1. `detectors/ranging.py`: detector + attribution (pure functions),
+   [2c] rule: theta_ok and latch.
 2. Range source seam (`RangeSource`) + simulated UWB source from the
    Gazebo truth feed.
 3. `configs/architecture_c_ranging.yaml`.
