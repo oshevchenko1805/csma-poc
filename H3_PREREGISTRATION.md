@@ -260,8 +260,11 @@ reason to exclude.
 - `false_alarms`: any ranging alarm in no-attack flights.
 - S3: `drift_itt_m` (H2 definition). `creep_mps` = median truth
   horizontal speed of uav_0 over [t_ack + 5 s, end]. `vel_err_mps` =
-  |EKF velocity − truth velocity|. This needs LOCAL_POSITION_NED vx, vy
-  logged (additive change).
+  |EKF velocity − truth velocity|, from LOCAL_POSITION_NED vx, vy.
+  [Implementation, before any flight: the pipeline monitors already log
+  the full LOCAL_POSITION_NED message, vx and vy included (checked in
+  the stage-3 raw data); only the B0 probe script dropped them. No
+  change needed; a regression test guards it.]
 
 ## Decision rule
 
@@ -393,7 +396,8 @@ attack flights).
    policies).
 5. `gps_spoofing`: optional rate + restore of OFF_R.
 6. Detector takeout also silences the target's ranging instance.
-7. EKF velocity (vx, vy) logging.
+7. EKF velocity (vx, vy) logging. [Already logged by the pipeline;
+   guarded by tests/test_ekf_velocity_logged.py.]
 8. `metrics/h3_analysis.py`: calibration, metrics and decision as code.
 9. `run_batch`: spoof-rate option, cells for the C-ranging config.
 
