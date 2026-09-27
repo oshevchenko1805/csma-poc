@@ -454,6 +454,87 @@ def fig_loss_sweep(loss_csv: str, outdir: str) -> None:
     _save(fig, outdir, "fig4_1_losssweep")
 
 
+# ------------------------------------------------------------------ fig D.1 (sustain k)
+
+SUSTAIN_KS = (1, 2, 3, 4, 5, 6)
+
+
+def sustain_counts(rows: list, ks=SUSTAIN_KS) -> dict:
+    """Offline re-evaluation of the local GPS detector's sustain rule k.
+
+    Same selection as the old metrics.plots.fig_sustain (table D.3):
+    gps_spoofing runs use the post-attack window (ratio_maxcons_post),
+    no-attack runs the whole series (ratio_maxcons_full_fleet); errored
+    runs and missing values are skipped. Returns counts, not shares, so
+    the figure and table D.3 print the same k/n.
+    """
+    from metrics.plots import flag, num
+    att = [num(r, "ratio_maxcons_post") for r in rows
+           if r.get("attack") == "gps_spoofing" and not flag(r, "errored")]
+    att = [v for v in att if v is not None]
+    cln = [num(r, "ratio_maxcons_full_fleet") for r in rows
+           if r.get("attack") == "none" and not flag(r, "errored")]
+    cln = [v for v in cln if v is not None]
+    return {"ks": list(ks),
+            "det": [sum(1 for v in att if v >= k) for k in ks], "n_att": len(att),
+            "fp": [sum(1 for v in cln if v >= k) for k in ks], "n_clean": len(cln)}
+
+
+def fig_sustain_d1(master_csv: str, outdir: str) -> dict:
+    """Fig. D.1: two stacked panels on a shared k axis, each on its own scale.
+
+    Upper: share of gps_spoofing runs whose local signal satisfies rule k.
+    Lower: share of no-attack runs with an alarm of this detector.
+    Wilson 95% whiskers, k/n on the points, plateau k = 2-4 shaded, the
+    campaign value k = 3 dotted. No in-figure title or notes: the caption
+    in CH4_V2_TEXT.md carries them.
+    """
+    from metrics.plots import load
+    from metrics.stats import wilson_bounds
+    c = sustain_counts(load(master_csv))
+    ks = c["ks"]
+
+    def pct(hits, n):
+        ys = [100.0 * h / n for h in hits]
+        ci = [wilson_bounds(h, n) for h in hits]
+        return ys, [y - 100.0 * b[0] for y, b in zip(ys, ci)], \
+            [100.0 * b[1] - y for y, b in zip(ys, ci)]
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(WIDTH_IN, 3.9), sharex=True,
+                                   gridspec_kw={"height_ratios": [1.25, 1]})
+    panels = ((ax1, c["det"], c["n_att"], "o", "Виявлено, %"),
+              (ax2, c["fp"], c["n_clean"], "s", "Тривоги\nбез атаки, %"))
+    for ax, hits, n, mk, ylab in panels:
+        ys, lo, hi = pct(hits, n)
+        ax.axvspan(1.6, 4.4, color="#f1f0ec", zorder=0, lw=0)
+        ax.axvline(3, color=INK_2, lw=0.9, ls=":", zorder=1)
+        ax.plot(ks, ys, color=INK, lw=1.3, zorder=3)
+        ax.errorbar(ks, ys, yerr=[lo, hi], fmt=mk, ms=5, color=INK,
+                    ecolor=NAV, elinewidth=1.2, capsize=0, zorder=4,
+                    markeredgecolor="white", markeredgewidth=0.8)
+        for k, y, h in zip(ks, ys, hits):
+            ax.annotate("%d/%d" % (h, n), (k, y), textcoords="offset points",
+                        xytext=(6, 3), fontsize=7.3, color=INK,
+                        ha="left", va="bottom")
+        ax.set_ylabel(ylab)
+        ax.grid(axis="x", visible=False)
+    ax1.set_ylim(48, 106)
+    ax1.set_yticks([50, 75, 100])
+    ax2.set_ylim(-1, 15)
+    ax2.set_yticks([0, 5, 10, 15])
+    ax1.text(1.68, 50.5, "плато k = 2–4", fontsize=7.3, color=INK_2,
+             ha="left", va="bottom")
+    ax1.text(3.07, 50.5, "k = 3 (кампанія)", fontsize=7.3, color=INK_2,
+             ha="left", va="bottom")
+    ax2.set_xlim(0.6, 6.6)
+    ax2.set_xticks(ks)
+    ax2.set_xlabel("Параметр підтвердження k (відліків поспіль)")
+    fig.tight_layout(h_pad=0.6)
+    fig.align_ylabels((ax1, ax2))
+    _save(fig, outdir, "figD1_sustain")
+    return c
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("runs_stage3", help="dir with stage-3 run_* folders")
@@ -461,9 +542,11 @@ def main(argv=None) -> int:
     ap.add_argument("v1_root", help="dir with thesis-campaign-v1 pass folders")
     ap.add_argument("--phys", default="runs_campaign/physical_outcomes.csv")
     ap.add_argument("--loss-csv", default="runs_final/detection_vs_loss.csv")
+    ap.add_argument("--master", default="runs_campaign/campaign_master.csv")
     ap.add_argument("--outdir", default="figures")
     a = ap.parse_args(argv)
     rows = load_rows(a.rows_json)
+    fig_sustain_d1(a.master, a.outdir)                 # D.1
     fig_loss_sweep(a.loss_csv, a.outdir)               # 4.1
     fig_arch_map(a.v1_root, a.phys, a.outdir)          # 4.2
     fig_mechanism(a.runs_stage3, rows, a.outdir)       # 4.3

@@ -46,3 +46,36 @@ def test_loss_sweep_renders(tmp_path):
     p.write_text("loss_prob,n,detected\n0.0,28,27\n0.1,29,29\n0.2,30,28\n0.3,30,19\n")
     fig_loss_sweep(str(p), str(tmp_path))
     assert (tmp_path / "fig4_1_losssweep.png").stat().st_size > 0
+
+
+def _sustain_rows():
+    rows = [{"attack": "gps_spoofing", "errored": "False",
+             "ratio_maxcons_post": str(v)} for v in (1, 3, 6)]
+    rows += [{"attack": "none", "errored": "False",
+              "ratio_maxcons_full_fleet": str(v)} for v in (0, 1, 2, "")]
+    rows.append({"attack": "gps_spoofing", "errored": "True",
+                 "ratio_maxcons_post": "9"})               # errored: skipped
+    return rows
+
+
+def test_sustain_counts_match_rule_and_skip_errored_and_missing():
+    from metrics.figures_ch4_v2 import sustain_counts
+    c = sustain_counts(_sustain_rows(), ks=(1, 3, 6))
+    assert c["n_att"] == 3 and c["n_clean"] == 3
+    assert c["det"] == [3, 2, 1]        # >= k
+    assert c["fp"] == [2, 0, 0]
+
+
+def test_sustain_d1_renders(tmp_path):
+    import csv
+    from metrics.figures_ch4_v2 import fig_sustain_d1
+    p = tmp_path / "master.csv"
+    rows = _sustain_rows()
+    keys = ["attack", "errored", "ratio_maxcons_post", "ratio_maxcons_full_fleet"]
+    with open(p, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=keys)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k, "") for k in keys})
+    fig_sustain_d1(str(p), str(tmp_path))
+    assert (tmp_path / "figD1_sustain.pdf").stat().st_size > 0
