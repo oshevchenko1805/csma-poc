@@ -1,0 +1,48 @@
+# Architecture C + B1 ranging (H3_PREREGISTRATION.md).
+#
+# Identical to architecture_c.yaml except that every monitor also runs the
+# ranging detector: inter-UAV ranges vs the ranges implied by the mesh
+# position announcements (detectors/ranging.py; theta 1.8 m, theta_ok
+# 1.3 m, k = 3, self latch). Needs a range source (the runner passes a
+# simulated UWB source fed by the Gazebo truth recorder). v1 configs are
+# untouched; the ranging reason is ranging_anomaly.
+#
+# Architecture C — CSMA with self-healing (the proposed architecture).
+#
+# Each UAV runs its own monitor on its own telemetry. Detection and
+# isolation are local AND announced over the mesh. Peers receive
+# security events, run cross-checks (e.g. peer-position consistency
+# for GPS spoofing), and a coordinator (lowest-alive-sysid election)
+# issues recovery requests.
+#
+# Mesh transport: ZeroMQ PUB/SUB peer-to-peer (brokerless).
+# Documented PoC approximation of FANET radio mesh: same propagation
+# semantics, different physical channel.
+
+architecture: C
+
+monitors:
+  - location: uav_0
+    watches: [uav_0]
+    detectors: [heartbeat, command, gps, cross_check, ranging]
+  - location: uav_1
+    watches: [uav_1]
+    detectors: [heartbeat, command, gps, cross_check, ranging]
+  - location: uav_2
+    watches: [uav_2]
+    detectors: [heartbeat, command, gps, cross_check, ranging]
+
+mesh:
+  enabled: true
+  transport: zeromq
+  endpoints:
+    uav_0: tcp://127.0.0.1:5550
+    uav_1: tcp://127.0.0.1:5551
+    uav_2: tcp://127.0.0.1:5552
+
+recovery:
+  enabled: true
+  coordinator_election: lowest_alive_sysid
+
+isolation:
+  enforcement: local_with_announce

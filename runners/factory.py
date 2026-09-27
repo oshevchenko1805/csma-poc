@@ -87,6 +87,8 @@ from detectors.command import CommandInjectionDetector
 from detectors.cross_check import CrossCheckDetector
 from detectors.gps import GpsSpoofingDetector
 from detectors.heartbeat import HeartbeatDetector
+from detectors.range_source import RangeSource, range_fn_for
+from detectors.ranging import RangingConsistencyDetector
 from enforcement.handlers import (
     DefaultMavsdkRunner,
     FilterCommandsHandler,
@@ -190,9 +192,9 @@ def _build_detectors(
 ) -> list:
     """Instantiate the requested detectors for a given watched UAV.
 
-    cross_check is intentionally NOT in this list — it has a different
-    contract (consumes PeerPositionAnnounce, not TelemetryEvent) and is
-    wired separately on the monitor.
+    cross_check and ranging are intentionally NOT in this list — they
+    have a different contract (consume PeerPositionAnnounce, not
+    TelemetryEvent) and are wired separately on the monitor.
     """
     out = []
     for name in detector_names:
@@ -206,7 +208,7 @@ def _build_detectors(
             out.append(
                 GpsSpoofingDetector(target_uav=target_uav, source=source)
             )
-        elif name == "cross_check":
+        elif name in ("cross_check", "ranging"):
             continue  # handled separately
         else:
             raise ValueError(f"unknown detector {name!r}")
@@ -356,11 +358,15 @@ def build_fleet(
     connection_factory: Optional[ConnectionFactory] = None,
     mesh_factory: Optional[MeshFactory] = None,
     process_runner: Optional[ProcessRunner] = None,
+    range_source: Optional[RangeSource] = None,
 ) -> WiredFleet:
     """Assemble all components required for one experiment run.
 
     Parameters
     ----------
+    range_source
+        Inter-UAV range source for the ranging detector (B1). Required iff
+        a monitor lists "ranging"; ignored otherwise. Default None = v1.
     process_runner
         ProcessRunner shared by ALL per-UAV RestartProcessHandlers in
         Architecture C. None (default) means each handler creates its
@@ -401,6 +407,7 @@ def build_fleet(
             connection_factory=connection_factory,
             mesh_factory=mesh_factory or _make_default_mesh_factory(arch_cfg.mesh),
             process_runner=process_runner,
+            range_source=range_source,
         )
     else:
         raise ValueError(f"unknown architecture {arch_cfg.architecture!r}")
@@ -486,7 +493,15 @@ def _build_arch_c(
     connection_factory: Optional[ConnectionFactory],
     mesh_factory: MeshFactory,
     process_runner: Optional[ProcessRunner] = None,
+    range_source: Optional[RangeSource] = None,
 ) -> WiredFleet:
+    if range_source is None and any(
+        "ranging" in m.detectors for m in arch_cfg.monitors
+    ):
+        raise ValueError(
+            "ranging detector configured but no range_source was given"
+        )
+
     # Validate that arch.mesh.endpoints covers every monitor's UAV.
     # (load_architecture_config already enforces this, but keep the
     # local check so the factory is robust if called with manually-
@@ -540,6 +555,15 @@ def _build_arch_c(
             if "cross_check" in spec.detectors
             else None
         )
+        ranging = (
+            RangingConsistencyDetector(
+                monitor_uav_id=uav_id,
+                source=source,
+                range_fn=range_fn_for(range_source, uav_id),
+            )
+            if "ranging" in spec.detectors
+            else None
+        )
 
         decider = IsolationDecider(source=source)
         enforcer = MeshAnnouncingIsolationEnforcer(mesh=mesh)
@@ -563,6 +587,7 @@ def _build_arch_c(
             failure_domain=spec.location,
             mesh=mesh,
             cross_check=cross_check,
+            ranging=ranging,
             _telemetry_connection=connection,
         )
         monitors.append(mon)

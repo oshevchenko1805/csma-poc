@@ -126,6 +126,7 @@ from core.telemetry import TelemetryListener
 from decision.isolation import IsolationDecider
 from detectors.base import Detector
 from detectors.cross_check import CrossCheckDetector
+from detectors.ranging import RangingConsistencyDetector
 from enforcement.isolation import IsolationEnforcer
 
 
@@ -190,6 +191,7 @@ class Monitor:
         isolation_enforcer: Optional[IsolationEnforcer] = None,
         mesh: Optional[MeshBus] = None,
         cross_check: Optional[CrossCheckDetector] = None,
+        ranging: Optional[RangingConsistencyDetector] = None,
         tick_period_sec: float = DEFAULT_TICK_PERIOD_SEC,
         peer_publish_period_sec: float = DEFAULT_PEER_PUBLISH_PERIOD_SEC,
         telemetry_log_path: Optional[Path] = None,
@@ -232,6 +234,15 @@ class Monitor:
                 f"cross_check.monitor_uav_id={cross_check.monitor_uav_id!r} "
                 f"does not match monitor uav_id={uav_id!r}"
             )
+        # ranging (B1, H3): same contract as cross_check — a mesh
+        # consumer bound to this monitor's UAV. Optional; v1 never sets it.
+        if ranging is not None and mesh is None:
+            raise ValueError("ranging detector requires mesh to be set")
+        if ranging is not None and ranging.monitor_uav_id != uav_id:
+            raise ValueError(
+                f"ranging.monitor_uav_id={ranging.monitor_uav_id!r} "
+                f"does not match monitor uav_id={uav_id!r}"
+            )
 
         self._uav_id = uav_id
         self._source = source
@@ -251,6 +262,7 @@ class Monitor:
         self._isolation_enforcer = isolation_enforcer
         self._mesh = mesh
         self._cross_check = cross_check
+        self._ranging = ranging
 
         self._logger = EventLogger(log_path)
 
@@ -290,7 +302,9 @@ class Monitor:
         # Subscribe to peer-position topic ONCE at construction so the
         # subscription is established before start(). Mesh implementations
         # are expected to buffer subscriptions until start().
-        if self._cross_check is not None and self._mesh is not None:
+        if (
+            self._cross_check is not None or self._ranging is not None
+        ) and self._mesh is not None:
             self._mesh.subscribe("peer_position", self._on_peer_position)
 
         # Diagnostics counters.
@@ -418,6 +432,10 @@ class Monitor:
     def isolation_enforcer(self) -> Optional[IsolationEnforcer]:
         return self._isolation_enforcer
 
+    @property
+    def ranging(self) -> Optional[RangingConsistencyDetector]:
+        return self._ranging
+
     # ----- callbacks -----
 
     def _on_telemetry(self, event: TelemetryEvent) -> None:
@@ -427,7 +445,13 @@ class Monitor:
         # outside detector_lock so the listener thread is never blocked
         # by the peer-publish thread.
         if event.msg_type == "GLOBAL_POSITION_INT":
-            self._update_last_position(event)
+            pos = self._update_last_position(event)
+            if pos is not None and self._ranging is not None:
+                with self._detector_lock:
+                    try:
+                        self._ranging.feed_own_position(*pos)
+                    except Exception:
+                        self._n_handler_errors += 1
 
         with self._detector_lock:
             for d in self._detectors:
@@ -451,16 +475,25 @@ class Monitor:
         if not isinstance(announcement, PeerPositionAnnounce):
             return
         self._n_peer_positions_received += 1
-        if self._cross_check is None:
+        if self._cross_check is None and self._ranging is None:
             return
         with self._detector_lock:
-            try:
-                result = self._cross_check.feed_peer_position(announcement)
-            except Exception:
-                self._n_handler_errors += 1
-                return
-            if result is not None:
-                self._emit_security(result)
+            if self._cross_check is not None:
+                try:
+                    result = self._cross_check.feed_peer_position(announcement)
+                except Exception:
+                    self._n_handler_errors += 1
+                    result = None
+                if result is not None:
+                    self._emit_security(result)
+            if self._ranging is not None:
+                try:
+                    results = self._ranging.feed_peer_position(announcement)
+                except Exception:
+                    self._n_handler_errors += 1
+                    results = []
+                for r in results:
+                    self._emit_security(r)
 
     def _tick_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -486,8 +519,11 @@ class Monitor:
                 break
             self._publish_peer_position()
 
-    def _update_last_position(self, event: TelemetryEvent) -> None:
-        """Convert GLOBAL_POSITION_INT to (lat, lon, alt, sample_ts)."""
+    def _update_last_position(
+        self, event: TelemetryEvent
+    ) -> Optional[tuple[float, float, float, float]]:
+        """Convert GLOBAL_POSITION_INT to (lat, lon, alt, sample_ts),
+        cache it, and return it (None if the message is malformed)."""
         try:
             lat_e7 = event.data["lat"]
             lon_e7 = event.data["lon"]
@@ -496,10 +532,11 @@ class Monitor:
             lon = float(lon_e7) / 1e7
             alt = float(alt_mm) / 1000.0
         except (KeyError, TypeError, ValueError):
-            return
+            return None
         sample_ts = event.timestamp
         with self._position_lock:
             self._last_position = (lat, lon, alt, sample_ts)
+        return (lat, lon, alt, sample_ts)
 
     def _publish_peer_position(self) -> None:
         if self._mesh is None:

@@ -36,8 +36,10 @@ import yaml
 
 VALID_ARCHITECTURES: frozenset[str] = frozenset({"A", "B", "C"})
 VALID_DETECTORS: frozenset[str] = frozenset(
-    {"heartbeat", "command", "gps", "cross_check"}
+    {"heartbeat", "command", "gps", "cross_check", "ranging"}
 )
+# "ranging" is B1 (H3_PREREGISTRATION.md): a C-only mesh consumer, enabled
+# only by configs/architecture_c_ranging.yaml.
 VALID_ATTACKS: frozenset[str] = frozenset(
     {"comm_disruption", "command_injection", "gps_spoofing"}
 )
@@ -390,6 +392,14 @@ def _validate_architecture_invariants(cfg: ArchitectureConfig) -> None:
             "mesh.delay_sec>0 requires mesh.enabled=true — channel delay "
             "only applies to the C mesh (A/B carry no mesh)"
         )
+
+    if cfg.architecture != "C":
+        for m in cfg.monitors:
+            if "ranging" in m.detectors:
+                raise ConfigError(
+                    f"architecture {cfg.architecture}: ranging detector is "
+                    "C-only (consumes mesh peer-position announcements)"
+                )
 
     if cfg.architecture == "A":
         # exactly one monitor, on the GS, watching every UAV present

@@ -192,6 +192,7 @@ class ExperimentRunner:
         px4_path: Optional[Path] = None,
         process_runner: Optional[ProcessRunner] = None,
         trajectory_recorder_factory: Optional[TrajectoryRecorderFactory] = None,
+        range_source: Optional[Any] = None,
     ) -> None:
         if attack_at_sec < 0:
             raise ValueError("attack_at_sec must be non-negative")
@@ -214,6 +215,9 @@ class ExperimentRunner:
         self._px4_path = px4_path
         self._process_runner = process_runner
         self._trajectory_recorder_factory = trajectory_recorder_factory
+        # B1 (H3): inter-UAV range source, passed through to build_fleet.
+        # None = v1. The caller feeds it (TrajectoryRecorder on_sample).
+        self._range_source = range_source
 
         # State filled during run()
         self._fleet: Optional[WiredFleet] = None
@@ -297,6 +301,7 @@ class ExperimentRunner:
             mesh_factory=self._mesh_factory,
             px4_path=self._px4_path,
             process_runner=self._process_runner,
+            range_source=self._range_source,
         )
         # Dedicated logger for attack ground-truth markers, lives
         # alongside monitor logs in the run directory.
