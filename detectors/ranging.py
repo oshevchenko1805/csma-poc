@@ -42,6 +42,12 @@ Data gaps: if p_i or r_ij is unavailable for an announcement, that
 pair's streaks are reset and the pair counts as not heard until its next
 evaluated announcement (no evidence from non-consecutive samples); no
 attribution is evaluated on that announcement.
+
+Health counters (stats; setup diagnostics, not outcomes): per peer
+announcement from another UAV, `evaluated` if a residual was computed;
+otherwise `no_own_position` if p_i was unavailable and/or `no_range` if
+r_ij was None or not finite (independent: one skipped announcement can
+count in both). Cumulative over the detector's life; reset() keeps them.
 """
 
 from __future__ import annotations
@@ -242,7 +248,20 @@ class RangingConsistencyDetector:
         self._alerted: set[str] = set()
         self._self_latched = False
 
+        # Health counters (not outcomes; see module docstring).
+        self._n_evaluated: int = 0
+        self._n_no_own_position: int = 0
+        self._n_no_range: int = 0
+
     # ----- diagnostics -----
+
+    @property
+    def stats(self) -> dict[str, int]:
+        return {
+            "evaluated": self._n_evaluated,
+            "no_own_position": self._n_no_own_position,
+            "no_range": self._n_no_range,
+        }
 
     @property
     def name(self) -> str:
@@ -287,9 +306,15 @@ class RangingConsistencyDetector:
 
         own = interpolate_position(self._own.samples, t, self._own_max_gap_s)
         measured = self._range_fn(ann.uav_id, t)
-        if own is None or measured is None or not math.isfinite(measured):
+        range_missing = measured is None or not math.isfinite(measured)
+        if own is None:
+            self._n_no_own_position += 1
+        if range_missing:
+            self._n_no_range += 1
+        if own is None or range_missing:
             pair.drop()
             return []
+        self._n_evaluated += 1
 
         implied = distance_3d_m(own, (ann.lat, ann.lon, ann.alt))
         rho = residual_m(implied, float(measured))

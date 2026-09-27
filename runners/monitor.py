@@ -419,6 +419,11 @@ class Monitor:
         if self._isolation_enforcer is not None:
             for k, v in self._isolation_enforcer.stats.items():
                 s[f"enforcer_{k}"] = v
+        # B1: ranging health counters, only when ranging is wired (v1
+        # stats keys unchanged). Setup diagnostics, not outcomes.
+        if self._ranging is not None:
+            for k, v in self._ranging.stats.items():
+                s[f"ranging_{k}"] = v
         return s
 
     @property
