@@ -399,6 +399,33 @@ attack flights).
 7. EKF velocity (vx, vy) logging. [Already logged by the pipeline;
    guarded by tests/test_ekf_velocity_logged.py.]
 8. `metrics/h3_analysis.py`: calibration, metrics and decision as code.
+   [Implementation, before any flight. Where the text above left a
+   choice open, the code fixes it as follows (tests/test_h3_analysis.py):
+   - t0 = attack_evidence.gps_spoofing.t_target_set (the OFF_N write),
+     not the runner's inject_start marker, which precedes it by the
+     OFF_R round trips (reported as inject_lag_s). No-attack flights
+     use the marker.
+   - Inclusion also requires t_target_set present and rate_confirmed
+     True (OFF_R read back = requested rate). Both are setup checks, not
+     outcomes; otherwise the flight's level is unknown.
+   - misattributions: ranging alarms naming uav_1/uav_2 in [0, W].
+     Ranging alarms before t0 in attack flights are reported separately
+     and do not enter the decision; false_alarms = every ranging alarm
+     of a no-attack flight, whole flight.
+   - An alarm with no navigation sample within +-0.25 s (harm unknown)
+     counts as a failed L1 flight, not an exclusion.
+   - vel_err_mps: same interval as creep_mps ([t_ack + 5 s, t0 + W]);
+     truth velocity = 1 s central difference of the Gazebo track.
+     drift_itt_m window ends at t0 + W (W = 120 s).
+   - Order of the verdict: INVALID CONFIG (architecture != C, no
+     range_source seed in run_summary, or ranging events carrying
+     constants other than theta 1.8 / theta_ok 1.3 / k 3) > INCOMPLETE
+     (included L1 != 5 or no-attack != 3) > NOT APPLICABLE (any gps or
+     cross_check alarm against uav_0 in [0, W] of an included L1 flight)
+     > NOT CONFIRMED on any false alarm > the k/5 rule.
+   - P-B1-2 is UNDETERMINED if an L10/L30 flight lacks t_rng or t_jump.
+   - `python3 -m metrics.h3_analysis <root>` prints only the batch
+     status (counts, exclusions); `--final` computes the metrics.]
 9. `run_batch`: spoof-rate option, cells for the C-ranging config.
 
 ## Amendments
