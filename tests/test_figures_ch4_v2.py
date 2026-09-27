@@ -38,3 +38,11 @@ def test_pick_v1_uses_cell_metric_and_is_deterministic():
     ]
     assert _pick_v1(rows, "gps_spoofing", "C")["run_id"] == "r2"   # drift median
     assert _pick_v1(rows, "gps_spoofing", "A")["run_id"] == "a1"   # route distance
+
+
+def test_loss_sweep_renders(tmp_path):
+    from metrics.figures_ch4_v2 import fig_loss_sweep
+    p = tmp_path / "loss.csv"
+    p.write_text("loss_prob,n,detected\n0.0,28,27\n0.1,29,29\n0.2,30,28\n0.3,30,19\n")
+    fig_loss_sweep(str(p), str(tmp_path))
+    assert (tmp_path / "fig4_1_losssweep.png").stat().st_size > 0

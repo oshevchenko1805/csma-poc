@@ -2,7 +2,7 @@
 metrics/figures_ch4_v2.py — new Fig. 4.3 (mechanism) and Fig. 4.4 (H2
 result) for Ch. 4, replacing the route-distance figures (review P1/P4).
 
-One message per figure (4.2 below):
+One message per figure (4.1 and 4.2 below):
   4.3  The attack corrupts the position estimate identically in every
        arm (≈50 m at ≈7.5 s); what differs is only what the response does
        with that estimate. Three small multiples on shared axes:
@@ -20,6 +20,9 @@ pass the CVD/contrast checks plus a secondary encoding (line style /
 marker shape), neutral grey for context, labels on the data instead of
 legends, no in-figure title (the caption carries it).
 
+  4.1  C detection through the mesh cross-check vs mesh loss
+       (runs_final/detection_vs_loss.csv; replaces the plots_extra
+       version — same data, new style, A/B campaign reference labelled).
   4.2  Architecture comparison map (thesis-campaign-v1): A, B, C x GPS
        spoofing, command injection; per cell the run nearest to the cell
        median of its physical metric (C/GPS: drift after response; others:
@@ -401,15 +404,67 @@ def fig_arch_map(v1_root: str, phys_csv: str, outdir: str) -> None:
     _save(fig, outdir, "fig4_2_arch_map")
 
 
+# ------------------------------------------------------------------ fig 4.1 (loss sweep)
+
+def fig_loss_sweep(loss_csv: str, outdir: str) -> None:
+    """C detection via mesh cross-check vs Bernoulli mesh loss.
+
+    Only C is swept (A/B have no mesh by construction); their campaign
+    values under detector takeout (0/28, 0/30) are drawn at loss 0 as a
+    reference, labelled as coming from the main campaign.
+    """
+    import csv
+    from metrics.stats import wilson_bounds
+    with open(loss_csv) as fh:
+        rows = list(csv.DictReader(fh))
+    xs = [float(r["loss_prob"]) for r in rows]
+    ks = [int(r["detected"]) for r in rows]
+    ns = [int(r["n"]) for r in rows]
+    ys = [100.0 * k / n for k, n in zip(ks, ns)]
+    ci = [wilson_bounds(k, n) for k, n in zip(ks, ns)]
+    lo = [y - 100.0 * c[0] for y, c in zip(ys, ci)]
+    hi = [100.0 * c[1] - y for y, c in zip(ys, ci)]
+
+    fig, ax = plt.subplots(figsize=(WIDTH_IN, 2.9))
+    ax.plot(xs, ys, color=INK, lw=1.4, zorder=3)
+    ax.errorbar(xs, ys, yerr=[lo, hi], fmt="o", ms=5, color=INK,
+                ecolor=NAV, elinewidth=1.2, capsize=0, zorder=4,
+                markeredgecolor="white", markeredgewidth=0.8)
+    # selective direct labels: start, the knee, the end
+    for i in (0, 2, 3, len(xs) - 1):
+        ax.annotate("%d/%d" % (ks[i], ns[i]), (xs[i], ys[i]),
+                    textcoords="offset points", xytext=(7, 4),
+                    fontsize=7.5, color=INK, ha="left", va="bottom")
+    # A/B reference from the main campaign (not part of this sweep)
+    ax.scatter([0.0, 0.0], [0.0, 0.0], marker="s", s=22, color=NAV,
+               zorder=4, edgecolors="white", linewidths=0.6)
+    ax.text(0.012, 3.0, "A і B: 0/28 і 0/30 (основна кампанія,\n"
+            "резервного каналу через mesh немає)", fontsize=7.2,
+            color=INK_2, ha="left", va="bottom", linespacing=1.15)
+    ax.text(0.66, 96, "C: виявлення через cross-check\n(детектор цілі вимкнено)",
+            fontsize=7.5, color=INK, ha="right", va="top", linespacing=1.15)
+    ax.set_xlim(-0.02, 0.68)
+    ax.set_ylim(-4, 104)
+    ax.set_xticks([0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    ax.set_yticks([0, 25, 50, 75, 100])
+    ax.set_xlabel("Імовірність втрати повідомлення в mesh")
+    ax.set_ylabel("Виявлено атак, %")
+    ax.grid(axis="x", visible=False)
+    fig.tight_layout()
+    _save(fig, outdir, "fig4_1_losssweep")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("runs_stage3", help="dir with stage-3 run_* folders")
     ap.add_argument("rows_json", help="runs_campaign/stage3_h2_rows.json")
     ap.add_argument("v1_root", help="dir with thesis-campaign-v1 pass folders")
     ap.add_argument("--phys", default="runs_campaign/physical_outcomes.csv")
+    ap.add_argument("--loss-csv", default="runs_final/detection_vs_loss.csv")
     ap.add_argument("--outdir", default="figures")
     a = ap.parse_args(argv)
     rows = load_rows(a.rows_json)
+    fig_loss_sweep(a.loss_csv, a.outdir)               # 4.1
     fig_arch_map(a.v1_root, a.phys, a.outdir)          # 4.2
     fig_mechanism(a.runs_stage3, rows, a.outdir)       # 4.3
     # p_Holm from H2_PREREGISTRATION.md "Results" (metrics/h2_analysis.py)
