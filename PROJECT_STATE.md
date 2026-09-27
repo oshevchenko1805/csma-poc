@@ -2291,3 +2291,66 @@ Fallback: if ranging does not close the blind zone, report the boundary
 
 Review doc updated: section "Этап 5: итоговая рамка и план", stage table.
 Next (new chat): step 1, data-dependency graph.
+
+## REVIEW STAGE 5 (part 3) — data-dependency graph, H3 pre-registered (2026-09-27)
+
+dd423e2  DATA_DEPENDENCY_GRAPH.md: data sources (GNSS_pos/vel, IMU,
+         EKF_pos/vel, INNOV, HB, CMD, ANN_v, PEER_pos, RANGE) -> detectors
+         as comparisons -> recovery actions and their inputs; A/B/C x 8
+         scenarios checked against v1/H2/B0 (8/8 consistent; post hoc =
+         consistency, not a test); predictions P-B1-1..8 for B1.
+         H3_PREREGISTRATION.md (2a design + 2b numbers, frozen before any
+         B1 code or flight). scripts/h3_predict_2b.py reproduces every
+         number (no tests; logic moves into detectors/ranging.py later).
+
+Graph, main reading: in v1 A/B/C differ in WHERE detection runs, not in
+WHAT data it uses — every v1 detector (incl. cross_check) compares the
+victim's own data; ANN_v is published from the victim's domain. gps sees
+a spoof EKF2 rejects, cross_check a reset jump, only ranging (B1) a
+smoothly accepted spoof. Zero-velocity hold uses EKF_vel = the victim's
+own estimate: valid only because this attack leaves GNSS velocity true.
+Derived, not flown: detector takeout at 3/1 m/s -> A = B = C = 0 (C's H1
+edge exists only for fast spoofs); takeout of the victim's OWN monitor
+-> cross_check (and B1) blind.
+
+H3 (within C): ranging detector rho = |p̂_j - p̂_i| - r_ij per 1 Hz
+announcement, alarm at |rho| > theta for 3 consecutive; attribution by
+3-node consistency (flag j if bad with j and fine with another peer;
+flag self if bad with all) -> 3 UAVs = minimum group. Reason
+ranging_anomaly: proportionate -> loiter, trust_aware -> zerovel,
+detect_only -> none. Config-only (architecture_c_ranging.yaml).
+Range model: truth + N(0, 0.1) + bias 0.2 + NLOS (p 0.05, Exp mean
+0.5 m); DW1000 LOS 0 ± 5 cm, NLOS 44-60 cm (Flueratoru et al. IoT J
+2022, verify ref); p_nlos is an assumption.
+Calibration moved from v1 to stage-3 pre-injection windows (same 5 m
+layers as B1): 130/131 runs (DT/trust_aware r1 gated: sparse truth and
+belief). theta = 1.8 m, H_max = theta + 5 = 6.8 m. Max rule is
+seed-sensitive (scratch run 1.6 m); frozen value = committed script.
+Predictions (model: B0 e(t) on stage-3 geometry, 130 x 20 seeds):
+L1 peer alarm 9 s (8-9), harm 5.8 m (5.1-5.9, max 6.6) <= 6.8 — margin
+~1 m; L30/L10 alarm at t_jump + 2-3 s, never before (P-B1-2, falsifiable);
+L3 before the jump in 98 % (8 s, 3.7 m) but local gps is earlier (5.7 s);
+LOITER after an L1 ranging alarm ~39 m (W = 120 s).
+Geometry finding: at the injection phase the peers are almost above the
+victim (horizontal 1-4 m, vertical 5/10 m), so a horizontal divergence is
+second order at first; north vs east spoof give the same harm.
+Flights planned: 20 (S1: L1 x5, L3/L10/L30 x2, no-attack x3; S2: DT+L1
+x2; S3: L1 loiter x2, zerovel x2), obs 120 s, layers 5 m.
+
+Data used (not in git): b0_raw_runs.tar.gz SHA-256 eb2d96ce...4569e07e2
+(verified); stage3_raw.tar.gz (SHA in runs_campaign/stage3_raw.sha256).
+
+Next (new chat): implementation, 9 items of H3_PREREGISTRATION.md
+"Implementation", one at a time, tests after each (990 now):
+ 1 detectors/ranging.py (detector + attribution, pure functions)
+ 2 RangeSource seam + simulated UWB source (Gazebo truth feed)
+ 3 configs/architecture_c_ranging.yaml
+ 4 ranging_anomaly in isolation + recovery tables (3 policies)
+ 5 gps_spoofing: optional rate (OFF_R before OFF_N, restore 0.02)
+ 6 detector_takeout also silences the target's ranging instance
+ 7 EKF velocity (vx, vy) logging
+ 8 metrics/h3_analysis.py (calibration, metrics, decision as code)
+ 9 run_batch: --spoof-rate, cells for the C-ranging config
+Then: H3 flights (step 3) -> offline coverage map (step 4) -> text.
+Rules unchanged: additive code, v1 defaults, no architecture branch,
+never git pull in ~/PX4-Autopilot.
