@@ -2249,3 +2249,45 @@ UAV, cooperative navigation, UWB noise parameters).
 
 Next: literature result -> fix framing and novelty wording -> H3
 pre-registration (B1).
+
+## REVIEW STAGE 5 (part 2) — framing fixed after literature check (2026-09-27)
+
+Literature check Q1–Q6: thesis_text/LIT_CHECK_2026-09-27.md (V's separate
+chat; Park & Yoo 2026 is an unrefereed preprint — recheck before defence;
+abstract-only sources to be read in full before citing, P3).
+
+Framing (fixed): one question through the thesis — which data each stage
+of the self-healing loop may trust. A/B/C stays the frame, presented as a
+comparison of which data stay independent of the compromised node.
+Novelty wording: вперше — A/B/C comparison on one PX4/Gazebo testbed
+(gap; no CSMA-for-UAV work found) and the three EKF2 regimes vs spoof
+speed (B0, narrow wording); удосконалено — method: data-dependency graph
+-> choice of detection source and recovery action with pre-registered
+predictions; ranging detection integrated into the CSMA loop (only after
+B1); набуло подальшого розвитку — the "independent data" principle
+(single vehicle: DeLorean) extended to a swarm and to both loop stages.
+B2 (navigation by neighbours) dropped as a contribution -> Ch.5 outlook.
+
+Plan, stage 5 from here:
+ 1. Data-dependency graph for A/B/C x attack scenarios; check against v1,
+    H2, B0; new predictions for B1. Zero-velocity hold uses EKF2 velocity
+    -> independent only under position-only spoofing (explicit in graph).
+ 2. H3 pre-registration (B1): ranging detector class in detectors/,
+    enabled in C by config; H3 tested within C (with vs without ranging).
+ 3. Flights: 3 UAVs flying, victim uav_0 at 30/10/3/1 m/s, 2–3 per level.
+ 4. Offline coverage map speed x sigma_GNSS: ranges = Gazebo truth + UWB
+    model (sigma 0.1 m, bias 0/0.2/0.4 m, NLOS tail); peers' GNSS noise
+    0.5/1.5/3 m added to announcements offline (limit: not through their
+    EKF). Physical outcome = harm_at_alarm + H2 action result.
+ 5. Text: Ch.3 (operational CSMA definition, graph, implementation,
+    adversary model), Ch.4 (B0 + H3 after H2), Ch.5 (limits, cost of
+    attack: rigid whole-swarm spoofing is invisible to any relative
+    detector).
+Adversary-model limits fixed now: single victim; position-only GNSS
+spoof; radio ranging not controlled by the attacker; 3 UAVs = small
+group; UWB parameters from DW1000/DW3000 datasheets + Flueratoru 2020.
+Fallback: if ranging does not close the blind zone, report the boundary
+("detects from X m/s"); the graph predicts that too.
+
+Review doc updated: section "Этап 5: итоговая рамка и план", stage table.
+Next (new chat): step 1, data-dependency graph.
