@@ -2080,3 +2080,43 @@ mission recovery: the aircraft stops, it does not continue the route.
 Next: stage 3 (H2 + metrics in repo before running -> action handler +
 tests -> campaign: current C / C without recovery / C with new policy
 x 3 GPS scenarios), in a new chat.
+
+
+## REVIEW STAGE 3 — H2 CONFIRMED (2026-09-26/27)
+
+Code (all additive, defaults = v1 behaviour; tests 842 -> 952):
+83f9983 recovery policies proportionate/trust_aware/detect_only + zero-
+velocity hold handler; 95e8bd7 pipeline wiring, --recovery-policy,
+recovery_settings in run_summary; e5c5228 flight-mode timeline;
+429dee8 gps_spoofing param readback -> attack_evidence; 0359d0b probe
+--mission / --offset 0 + STAGE3_PILOT.md; 8d14fb8 run_batch cells
+ARCH/ATTACK@POLICY + --order replicate-major (fixes silent skip of a
+second arm on resume); ad14777 metrics/peer_separation.py; 7d501d4
+--altitude-layer-step; 6b320ac H2_PREREGISTRATION.md + metrics/
+h2_analysis.py (committed before the first campaign run).
+
+Pilot (STAGE3_PILOT.md): no-attack braking at cruise — zero-velocity
+2.32/2.90/2.91 m, LOITER 3.99 m -> bound B = 7.91 m. DT "no difference"
+prediction withdrawn before any pipeline run. Pipeline pilot B1 exposed
+a collision (0.39 m, uav_2 into the stopped uav_0); baseline check then
+showed peers touch (< 1 m) in 13/34 CLEAN v1 flights — a testbed
+geometry property (same 20 m layer, squares offset 5/10 m). Fixed for
+stage 3 with 5 m altitude layers (uav_0 unchanged at 20 m). OPEN-5
+opened (below).
+
+Campaign runs_stage3: 3 arms x 3 GPS cells x 15, replicate-major,
+layers 5 m. 131/135 included (4 setup timeouts, injection never
+executed). H2 CONFIRMED: median post-response drift trust_aware vs
+proportionate GPS 1.53 vs 50.13 m (p_Holm 3.7e-6), MT 1.44 vs 50.12 m
+(3.4e-6); DT descriptive 3.70 vs 8.61 m. 0/44 action failures, OFFBOARD
+held in every run, 0 contacts, nav error ~50 m in all arms, proportionate
+reproduces v1. Full tables: H2_PREREGISTRATION.md "Results". Derived
+rows: runs_campaign/stage3_h2_rows.json. Raw: VM ~/csma_poc_v2/
+runs_stage3 (+ pilot dirs), archive stage3_raw.tar.gz (SHA-256 in
+runs_campaign/stage3_raw.sha256), not in git.
+
+OPEN-5 (existing data, no flights): do v1 false positives (fp_census,
+17 runs) and the 1-2 m baseline deviation peaks coincide with peer
+contacts? If yes, reclassify them as testbed artefacts in Ch. 4.
+
+Next: stage 4 — analysis and rewrite of Ch. 4 (P1, P4), in a new chat.
