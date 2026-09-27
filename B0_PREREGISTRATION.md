@@ -92,8 +92,12 @@ Same classes, same parameters as the campaign; no detector code changes.
   detector; if no alarm, its maximum over W. How far the UAV had been
   dragged before anyone noticed.
 
-Frames and alignment exactly as `metrics/trust_hold_probe.py` (truth ENU,
-belief NED, constant offset removed with the pre-injection median).
+Frames and alignment as `metrics/trust_hold_probe.py` (truth ENU,
+belief NED, constant offset removed with the pre-injection median), with
+one change made before the first flight: truth is linearly interpolated
+to belief timestamps instead of nearest-sample pairing (at 5 m/s the
+nearest Gazebo sample can be ~2.5 m off). The GPS ramp is measured the
+same way: GPS_RAW_INT north minus interpolated truth north.
 
 ## Classification (per flight, then per level)
 
