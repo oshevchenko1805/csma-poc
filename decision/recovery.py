@@ -22,6 +22,7 @@ Each IsolationAnnounce.reason maps to one canonical recovery action:
     command_injection     filter_commands
     gps_anomaly           mode_loiter
     cross_check_anomaly   mode_loiter
+    ranging_anomaly       mode_loiter      (B1, H3; never emitted in v1)
 
 These are documented in Chapter 4 alongside the attack-detection table.
 The mapping table is module-level so other code (tests, monitors) can
@@ -44,6 +45,12 @@ estimate is no longer trustworthy; LOITER holds that very estimate and
 is dragged by it (~50 m, review P1). A zero-velocity hold does not use
 the position estimate. command_injection leaves the estimate intact, so
 its action is unchanged.
+
+ranging_anomaly (B1, H3_PREREGISTRATION.md) is a position anomaly like
+the other two and follows the same row in every policy: proportionate ->
+mode_loiter, trust_aware -> hold_zero_velocity, detect_only -> none. Only
+the ranging detector emits it, and no v1 configuration builds that
+detector, so v1 behaviour is unchanged.
 
 Causal chain
 ------------
@@ -90,6 +97,7 @@ REASON_TO_ACTION: dict[str, str] = {
     "command_injection": RecoveryAction.FILTER_COMMANDS,
     "gps_anomaly": RecoveryAction.MODE_LOITER,
     "cross_check_anomaly": RecoveryAction.MODE_LOITER,
+    "ranging_anomaly": RecoveryAction.MODE_LOITER,
 }
 
 
@@ -107,6 +115,7 @@ TRUST_AWARE_REASON_TO_ACTION: dict[str, str] = {
     "command_injection": RecoveryAction.FILTER_COMMANDS,
     "gps_anomaly": RecoveryAction.HOLD_ZERO_VELOCITY,
     "cross_check_anomaly": RecoveryAction.HOLD_ZERO_VELOCITY,
+    "ranging_anomaly": RecoveryAction.HOLD_ZERO_VELOCITY,
 }
 
 # Ablation arm: detection, isolation and the mesh announcement happen as

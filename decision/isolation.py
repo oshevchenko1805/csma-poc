@@ -49,6 +49,9 @@ _DETECTOR_TO_REASON: dict[str, str] = {
     "command": "command_injection",
     "gps": "gps_anomaly",
     "cross_check": "cross_check_anomaly",
+    # B1 (H3_PREREGISTRATION.md): inter-UAV range inconsistency. Emitted
+    # only by the ranging detector, which v1 configs never build.
+    "ranging": "ranging_anomaly",
 }
 
 

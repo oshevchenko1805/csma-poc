@@ -2,7 +2,8 @@
 ZeroVelocityHoldHandler — stop the UAV by commanding zero velocity.
 
 Recovery action of the `trust_aware` policy for position anomalies
-(gps_anomaly, cross_check_anomaly). Review stage 3, 2026-09-26.
+(gps_anomaly, cross_check_anomaly; ranging_anomaly in B1). Review
+stage 3, 2026-09-26.
 
 Why not LOITER
 --------------
