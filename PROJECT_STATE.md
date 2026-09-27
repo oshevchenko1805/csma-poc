@@ -2201,3 +2201,51 @@ table 3.14 -> add nav error, drift after response, mission execution;
 add Kerns et al. 2014 to the references.
 Review doc: P1, P4 -> Закрыто; stage 4 -> Готово.
 Next: stage 5 — checkpoint: variant B (peer-assisted navigation) or not.
+
+## REVIEW STAGE 5 (part 1) — P5 closed, fig D.1, B0 spoof-rate sweep (2026-09-27)
+
+4417b08  P5: stage-3 detect_only arm named the self-healing ablation for
+         the GPS cells (4.5.2); command injection stated as a limit
+         (4.5.3: the recovery action IS the command filter, so C without
+         recovery equals A/B by construction). Fig D.1 redrawn
+         (figures_ch4_v2.fig_sustain_d1 -> figures/figD1_sustain.*),
+         2 tests. Ch.4 -> docx deferred: moved once, after B4.
+589296f  B0_PREREGISTRATION.md (before any flight).
+6933c55  metrics/spoof_rate_probe.py (rules as code),
+         scripts/probe_spoof_rate.py (flight + --analyze + --report),
+         16 tests; prereg amended before flight 1 (truth interpolated to
+         belief timestamps). Tests 974 -> 990 (VM).
+
+Patch semantics (checked in ~/PX4-Autopilot, HEAD 9fe69d4f33, clone,
+never pulled; 3 files modified in gz_bridge): OFFSET_INJECT runs in
+GZBridge::addGpsNoise, called from navSatCallback per navsat message
+(x500_base update_rate 30 Hz): off += SIM_GPS_OFF_R * (target - off).
+First-order approach, NOT a linear ramp: v0 = r*f*A (max, at onset),
+tau = -1/(f ln(1-r)). Campaign r = 0.02 -> v0 = 30 m/s, tau = 1.65 s.
+Confirmed in flight: spoof at tau = 31.6 m on every B0 flight.
+NB: never `git pull` in ~/PX4-Autopilot (a `git fetch` happened today:
+remote refs only, tree and patch untouched, submodules clean).
+
+B0 result (8/8 flights valid, both flights per level agree): decision
+BLIND ZONE, v_blind = 1 m/s -> B1. Full table in B0_PREREGISTRATION.md
+"Results". Raw data b0_raw_runs.tar.gz SHA-256 eb2d96ce...4569e07e2.
+  L30, L10: gps + cross_check (cc fires on the EKF reset jump ~7.5 s)
+  L3 (3 m/s): gps only (5.7 s); reset step 19 m < cc budget 35 m
+  L1 (1 m/s): no alarm at all; EKF absorbs the spoof smoothly; UAV taken
+              48 m off route undetected
+Reset step size = offset accumulated by ~7.5 s (model 49.4/39.2/18.1 m,
+measured 49.0/39.1/19.2 m) — consistent with a timeout-driven EKF2
+reset (interpretation, PX4 source not checked).
+
+Framing proposed (to be fixed after the literature check, separate
+chat): one principle across the self-healing loop — each stage must rely
+on data independent of the compromised node. Recovery side: H2 (done).
+Detection side: B0 boundary (done) -> B1 inter-UAV ranging via mesh
+(H3, tested within C like H2). B2 (navigation by neighbours) decided
+after B1. Literature prompt Q1–Q6 given to V (cooperative spoofing
+detection by ranging, slow/carry-off spoofing vs innovation detectors,
+trust-aware response selection, architecture comparisons / CSMA for
+UAV, cooperative navigation, UWB noise parameters).
+
+Next: literature result -> fix framing and novelty wording -> H3
+pre-registration (B1).

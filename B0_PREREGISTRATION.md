@@ -144,3 +144,50 @@ n = 2 per level; one direction (north), one magnitude (50 m), one route;
 lossless mesh in the cross-check replay; detectors re-evaluated offline
 with the campaign classes, not live monitors; position-only spoof (GNSS
 velocity stays true).
+
+## Results (2026-09-27)
+
+8 flights, 2 per level, all valid, both flights of every level agree.
+Order as pre-registered (L30, L10, L3, L1, then the second round).
+Raw data: `b0_raw_runs.tar.gz` (VM `~/b0_runs`), SHA-256
+`eb2d96ce1eb0b28bd4e8dea6d840f3483bed36cb452a37aecf1851b4569e07e2`,
+4 920 194 bytes; copy on the Mac `~/Documents/csma/`. Report:
+`python3 scripts/probe_spoof_rate.py --report ~/b0_runs`.
+
+Checks: ramp_ok on every flight (spoof at tau 31.52–31.66 m, model
+31.61 m; at 2·tau 43.19–43.27 m, model 43.23 m) -> f = 30 Hz confirmed.
+Control L30 reproduces the campaign in both flights (jump 7.28 / 7.29 s,
+gps 2.61 / 2.68 s). No alarm before injection in any flight.
+
+| level | v0, m/s | t_gps, s | t_cc, s | max_step_1s, m | t(err > 25 m), s | harm_at_alarm, m | class |
+|---|---|---|---|---|---|---|---|
+| L30 | 30 | 2.61 / 2.68 | 7.69 / 7.70 | 49.0 / 49.0 | 7.28 / 7.29 | 0.40 / 0.35 | DETECTED (both) |
+| L10 | 10 | 3.67 / 3.69 | 7.72 / 7.64 | 39.0 / 39.1 | 7.69 / 7.65 | 0.51 / 0.57 | DETECTED (both) |
+| L3 | 3 | 5.67 / 5.69 | — / — | 19.2 / 19.3 | 13.3 / 13.4 | 4.3 / 4.1 | DETECTED (gps only) |
+| L1 | 1 | — / — | — / — | 0.99 / 0.99 | 37.1 / 37.3 | 48.4 / 48.5 (max, no alarm) | **BLIND** |
+
+nav_error_end 48.2–50.1 m in every flight (the attack landed at every
+level). L0.5 not flown (L1 already BLIND; extension not triggered).
+
+**Decision (pre-registered rule): BLIND ZONE, v_blind = 1 m/s -> B1.**
+
+Observations (descriptive, n = 2):
+
+- The cross-check path exists only through the EKF reset. The size of the
+  1 s estimate step matches the spoof offset accumulated by ~7.5 s
+  (model at t = 7.28 / 7.65 / 7.5 s: 49.4 / 39.2 / 18.1 m for L30 / L10 / L3; measured 49.0 / 39.1 /
+  19.2 m), i.e. consistent with a timeout-driven EKF2 reset to GPS. That
+  the reset is timeout-driven is an interpretation, not checked in the PX4
+  source. Below ~35 m of accumulated offset (the cross-check budget) the
+  mesh path is silent: already at 3 m/s.
+- At 1 m/s the EKF accepts the spoof without rejection (estimate moves
+  <= 1 m per second with the spoof): no innovation, no jump, no alarm;
+  the UAV is taken 48 m off route. The local detector's own boundary lies
+  between 1 and 3 m/s (not resolved; intermediate levels were not
+  pre-registered).
+- Every current detector — local and mesh — is driven by the victim's own
+  data, so they fail together. This is the case for an independent
+  measurement (B1).
+
+Predictions: L30/L10 as predicted; L1 "cross_check silent" as predicted,
+"gps uncertain" resolved as silent.
