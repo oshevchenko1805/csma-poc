@@ -2120,3 +2120,42 @@ OPEN-5 (existing data, no flights): do v1 false positives (fp_census,
 contacts? If yes, reclassify them as testbed artefacts in Ch. 4.
 
 Next: stage 4 — analysis and rewrite of Ch. 4 (P1, P4), in a new chat.
+
+
+## REVIEW STAGE 4 (part 1) — OPEN-5, physical tables, Ch.4 figures (2026-09-27)
+
+OPEN-5 CLOSED (c67c120, metrics/fp_contact.py + 6 tests). Pre-stated rule:
+MIXED — 6/11 gps/cross_check FP runs have a peer contact of the accused
+UAV within [-10 s, +1 s] (chance p0 0.077, p 6.7e-5); heartbeat 0/2;
+1-2 m baseline nav-error peaks at chance (43/290 vs p0 0.065) -> not
+contacts, "cornering/stitching" stands. Exploratory (after looking):
+11/11 gps/cross_check FP follow a collision in which the accused UAV
+falls 20 m -> <5 m within ~3 s (detector fires 3-22 s later, when the
+estimate diverges); 6/6 heartbeat FP coincide with a Gazebo stream
+stall (17 s, 54 s gaps, or stream end ~3 s before). No genuine detector
+false positive remains in v1. The "FP loop depth" trade-off (n=2, both
+C) is withdrawn: both runs are collisions.
+
+Collisions (metrics/collision_flags.py, runs_campaign/collision_flags.csv
+force-added, sha256 f63f7f01...46201025): collision fall of any UAV in
+97/414 valid v1 runs; target fell before injection in 14 attack runs.
+Validity rules NOT changed; sensitivity table D.1: medians unchanged.
+
+P1 tables (db4c2da, metrics/ch4_physical_tables.py ->
+thesis_text/CH4_PHYSICAL_TABLES.md): 4.6 nav integrity + drift after
+response (GPS cells), 4.7 mission execution (CI: C 13/15 full vs A/B
+0/15, Fisher p 1.8e-6), 4.8 phase/geometry unchanged + drift/execution;
+clean-flight coordination tails are collisions (5/6, 3/3).
+
+Figures (metrics/figures_ch4_v2.py, byte-identical on VM): 4.1 loss
+sweep restyled; 4.2 architecture map A/B/C x GPS, CI (v1); 4.3
+mechanism (stage 3: LOITER before/after jump vs zero-velocity); 4.4 H2
+per-run drift. Old 4.4 trade-off dropped (route-distance artefact);
+old 4.2 sustain-k -> appendix (its FP panel = collisions).
+runs_campaign/stage3_h2_rows.json force-added (was .gitignored).
+Tests 952 -> 968.
+
+Framing decided (review doc, "Этап 4: решения по подаче"): the frame
+stays A/B/C comparison; the recovery-action finding is presented as a
+limitation found by the comparison -> design requirement -> verified by
+H2 (not "fixed it"). Next: Ch.4 text rewrite (P4), new chat.
