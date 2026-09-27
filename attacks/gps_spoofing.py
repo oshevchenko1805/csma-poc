@@ -54,6 +54,19 @@ proves nothing leaks into the next run. Deliberately not read in fire():
 an extra round trip there would delay the inject_start marker and make
 timings incomparable with the thesis-campaign-v1 runs.
 
+Spoof rate (B1, H3_PREREGISTRATION.md "Attack")
+-----------------------------------------------
+Optional `spoof_rate` sets SIM_GPS_OFF_R, the per-GPS-message approach
+rate of the patched offset (off += OFF_R * (OFF_N - off), 30 Hz;
+v0 = r * f * A). Default None = v1: OFF_R is never touched and the
+evidence dict is unchanged. When set, fire() reads OFF_R, writes it
+BEFORE OFF_N (so the ramp starts at the requested rate), and records the
+wall-clock time of each write; cleanup() restores OFF_N as before and
+then OFF_R to `rate_restore_value` (0.02, the campaign value), reading
+both back. OFF_R is restored whenever it was written, even if the OFF_N
+write failed. The extra round trips delay the OFF_N write after the
+runner's attack_fired_wall; `t_target_set` gives the exact instant.
+
 Why this approach
 -----------------
 The dissertation evaluates the detection/recovery pipeline, not RF GPS
@@ -64,6 +77,7 @@ acknowledged as an approximation in Chapter 4.
 
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from attacks.base import AttackContext, AttackInjector
@@ -86,15 +100,33 @@ class GpsSpoofingInjector(AttackInjector):
     """Fallback restore target if the pre-attack read fails. 0.0 = the
     patched OFF_N default (no offset)."""
 
+    DEFAULT_RATE_PARAM_NAME: str = "SIM_GPS_OFF_R"
+    """GZBridge-patched param: per-message approach rate of the offset."""
+
+    DEFAULT_RATE_RESTORE_VALUE: float = 0.02
+    """OFF_R restored after the attack: the campaign rate (30 m/s)."""
+
     def __init__(
         self,
         *,
         param_name: str = DEFAULT_PARAM_NAME,
         spoofed_value: float = DEFAULT_SPOOFED_VALUE,
         restore_value: Optional[float] = None,
+        spoof_rate: Optional[float] = None,
+        rate_param_name: str = DEFAULT_RATE_PARAM_NAME,
+        rate_restore_value: float = DEFAULT_RATE_RESTORE_VALUE,
     ) -> None:
         if not param_name:
             raise ValueError("param_name must be non-empty")
+        if spoof_rate is not None:
+            if isinstance(spoof_rate, bool) or not isinstance(
+                spoof_rate, (int, float)
+            ):
+                raise TypeError("spoof_rate must be int or float")
+            if not 0.0 < float(spoof_rate) <= 1.0:
+                raise ValueError("spoof_rate must be in (0, 1]")
+            if not rate_param_name:
+                raise ValueError("rate_param_name must be non-empty")
         if isinstance(spoofed_value, bool):
             raise TypeError("spoofed_value cannot be bool")
         if not isinstance(spoofed_value, (int, float)):
@@ -106,6 +138,18 @@ class GpsSpoofingInjector(AttackInjector):
         self._restore_value = (
             float(restore_value) if restore_value is not None else None
         )
+
+        self._spoof_rate = (
+            float(spoof_rate) if spoof_rate is not None else None
+        )
+        self._rate_param_name = rate_param_name
+        self._rate_restore_value = float(rate_restore_value)
+        self._rate_original: Optional[float] = None
+        self._rate_set: bool = False
+        self._rate_readback_end: Optional[float] = None
+        self._rate_readback_restored: Optional[float] = None
+        self._t_rate_set: Optional[float] = None
+        self._t_target_set: Optional[float] = None
 
         self._param_writer = None  # set in arm() from ctx
         self._armed: bool = False
@@ -122,6 +166,10 @@ class GpsSpoofingInjector(AttackInjector):
     @property
     def original_value(self) -> Optional[float]:
         return self._original_value
+
+    @property
+    def spoof_rate(self) -> Optional[float]:
+        return self._spoof_rate
 
     async def arm(self, ctx: AttackContext) -> None:
         # Grab the param channel the experiment layer provided. It may be
@@ -154,9 +202,25 @@ class GpsSpoofingInjector(AttackInjector):
             except Exception:
                 self._original_value = self.DEFAULT_RESTORE_VALUE
 
+        # B1: rate BEFORE target, so the ramp starts at the requested rate.
+        if self._spoof_rate is not None:
+            try:
+                self._rate_original = await self._param_writer.get_param_float(
+                    self._rate_param_name
+                )
+            except Exception:
+                self._rate_original = None
+            await self._param_writer.set_param_float(
+                self._rate_param_name, self._spoof_rate
+            )
+            self._rate_set = True
+            self._t_rate_set = time.time()
+
         await self._param_writer.set_param_float(
             self._param_name, self._spoofed_value
         )
+        if self._spoof_rate is not None:
+            self._t_target_set = time.time()
         self._fired = True
 
     async def cleanup(self) -> None:
@@ -164,7 +228,10 @@ class GpsSpoofingInjector(AttackInjector):
         # complete its set, the param was never changed. Restore uses the
         # still-live mission connection (ExperimentRunner runs attack
         # cleanup before mission.abort()).
-        if not self._fired or self._param_writer is None:
+        if self._param_writer is None:
+            return
+        if not self._fired:
+            await self._restore_rate()  # B1: no-op unless OFF_R was written
             return
         restore_to = (
             self._original_value
@@ -192,6 +259,35 @@ class GpsSpoofingInjector(AttackInjector):
                 (self._readback_error + "; " if self._readback_error else "")
                 + f"restored: {exc}"
             )
+        await self._restore_rate()
+
+    async def _restore_rate(self) -> None:
+        """B1: restore OFF_R if fire() wrote it (after OFF_N). No-op in v1."""
+        if not self._rate_set or self._param_writer is None:
+            return
+        try:
+            self._rate_readback_end = await self._param_writer.get_param_float(
+                self._rate_param_name
+            )
+        except Exception as exc:
+            self._add_error(f"rate end: {exc}")
+        try:
+            await self._param_writer.set_param_float(
+                self._rate_param_name, self._rate_restore_value
+            )
+        except Exception:
+            pass
+        try:
+            self._rate_readback_restored = (
+                await self._param_writer.get_param_float(self._rate_param_name)
+            )
+        except Exception as exc:
+            self._add_error(f"rate restored: {exc}")
+
+    def _add_error(self, msg: str) -> None:
+        self._readback_error = (
+            (self._readback_error + "; " if self._readback_error else "") + msg
+        )
 
     READBACK_TOL: float = 1e-3
 
@@ -207,15 +303,35 @@ class GpsSpoofingInjector(AttackInjector):
             confirmed = (
                 abs(self._readback_end - self._spoofed_value) <= self.READBACK_TOL
             )
-        return {
-            "gps_spoofing": {
-                "param": self._param_name,
-                "fired": self._fired,
-                "spoofed_value": self._spoofed_value,
-                "original_value": self._original_value,
-                "readback_end_of_window": self._readback_end,
-                "readback_after_restore": self._readback_restored,
-                "readback_error": self._readback_error,
-                "injection_confirmed": confirmed,
-            }
+        ev = {
+            "param": self._param_name,
+            "fired": self._fired,
+            "spoofed_value": self._spoofed_value,
+            "original_value": self._original_value,
+            "readback_end_of_window": self._readback_end,
+            "readback_after_restore": self._readback_restored,
+            "readback_error": self._readback_error,
+            "injection_confirmed": confirmed,
         }
+        if self._spoof_rate is not None:   # B1 only; v1 keys unchanged
+            if not self._rate_set:
+                rate_ok: Optional[bool] = False
+            elif self._rate_readback_end is None:
+                rate_ok = None
+            else:
+                rate_ok = (
+                    abs(self._rate_readback_end - self._spoof_rate)
+                    <= self.READBACK_TOL
+                )
+            ev.update({
+                "rate_param": self._rate_param_name,
+                "spoof_rate": self._spoof_rate,
+                "rate_original": self._rate_original,
+                "rate_readback_end_of_window": self._rate_readback_end,
+                "rate_restore_value": self._rate_restore_value,
+                "rate_readback_after_restore": self._rate_readback_restored,
+                "rate_confirmed": rate_ok,
+                "t_rate_set": self._t_rate_set,
+                "t_target_set": self._t_target_set,
+            })
+        return {"gps_spoofing": ev}
