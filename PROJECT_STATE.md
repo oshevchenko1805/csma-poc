@@ -2354,3 +2354,67 @@ Next (new chat): implementation, 9 items of H3_PREREGISTRATION.md
 Then: H3 flights (step 3) -> offline coverage map (step 4) -> text.
 Rules unchanged: additive code, v1 defaults, no architecture branch,
 never git pull in ~/PX4-Autopilot.
+
+## REVIEW STAGE 5 (part 4) — H3 [2c] attribution rule; B1 implementation items 1-7 (2026-09-27)
+
+1b34295  H3 [2c], before any B1 code or flight. 2b modelled the peers'
+         view and the victim's self path, not the victim's OWN monitor
+         judging its peers (it uses its tainted EKF position). With the
+         5 m layers the pair 0-1 crosses theta ~1 s before 0-2, so the
+         2a rule ("bad with j, not bad with k") made the victim's monitor
+         flag honest uav_1 in 5196/5200 L1 model runs. Later in the lap a
+         perpendicular error makes 0-2 genuinely consistent: no threshold
+         resolves that from two residuals.
+         scripts/h3_predict_2c.py (same data, geometries, B0 e(t), theta,
+         peer-path seeds as 2b; all three monitors; 8 rule variants).
+         Chosen: fine = 3x |rho| <= theta_ok = 1.3 m (calibration max
+         1.24 rounded up, i.e. theta without the 0.5 margin) + latch
+         (after a self flag a monitor flags no peer). Model: L1 peer alarm
+         9 s (8-10), harm 5.9 m (max 6.6 <= H_max 6.8, worst margin 0.2 m),
+         0 misattributions on every monitor; L3 34/5200 by the victim's
+         monitor before its self flag; L10/L30 0; no-attack 0. Rejected
+         0.9 m (theta/2): no derivation, harm > H_max in 7/5200.
+
+Implementation (additive, v1 defaults, no architecture branch):
+eb97624  1 detectors/ranging.py: RangingConsistencyDetector; pure fns
+         (geodetic distance, interpolation without gaps > 0.5 s, streaks,
+         attribute()); range_fn(peer, t) injected; returns a list of
+         events; data gap -> pair reset/unheard; stale after 2.5 s.
+         Test documents the limit: uav_2 2 m north of the victim -> the
+         victim's monitor flags uav_1 before its self flag (peers correct).
+63de0a4  2 detectors/range_source.py: RangeSource protocol, range_fn_for,
+         TruthBuffer (thread-safe, 10 s), SimulatedUwbRangeSource (truth +
+         0.2 + N(0,0.1) + NLOS p 0.05 Exp 0.5; noise = pure fn of (seed,
+         from, to, t ms), reproducible offline; describe() for
+         run_summary). TrajectoryRecorder: optional on_sample callback
+         (stats key on_sample_errors only when set).
+efcb541  3 configs/architecture_c_ranging.yaml (= C + ranging); ranging
+         C-only in config; build_fleet(range_source=None) -> fail fast if
+         ranging configured without a source; Monitor(ranging=...) feeds
+         own GLOBAL_POSITION_INT fixes and peer announcements (after
+         cross_check); ExperimentRunner(range_source=None) pass-through.
+6fafcbc  4 ranging -> ranging_anomaly; proportionate loiter, trust_aware
+         zerovel, detect_only none; v1 rows unchanged (test).
+28c451f  5 GpsSpoofingInjector(spoof_rate=None): OFF_R read, written
+         BEFORE OFF_N; cleanup restores OFF_N then OFF_R = 0.02 (also if
+         the OFF_N write failed); evidence adds rate readbacks,
+         rate_confirmed, t_rate_set, t_target_set (use t_target_set as
+         injection time in analysis). v1 evidence keys unchanged.
+954282b  6 disable_local_detectors() also silences the target monitor's
+         ranging (both paths); peers' ranging and cross_check untouched.
+ea124f3  7 no code: pipeline monitors already log full LOCAL_POSITION_NED
+         incl. vx/vy (checked in stage-3 raw); only the B0 probe script
+         dropped them. Regression test; prereg note.
+Tests 990 -> 1130 (VM).
+
+Not yet wired (item 9): run_one/run_batch must build TruthBuffer +
+SimulatedUwbRangeSource(seed per flight), pass on_sample=buffer.add to
+the TrajectoryRecorder and range_source to ExperimentRunner, log
+range_source.describe() (seed) in run_summary, add --spoof-rate and the
+S1-S3 cells for architecture_c_ranging.
+
+Review doc updated: stage table (row 5), P6, new section "Этап 5:
+реализация B1, пункты 1-7", journal.
+Next (new chat): item 8 metrics/h3_analysis.py (calibration check,
+per-flight metrics, inclusion, decision as code + tests), item 9
+run_one/run_batch; then the 20 H3 flights.
