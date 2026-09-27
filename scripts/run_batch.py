@@ -50,6 +50,11 @@ A/gps_spoofing,B/gps_spoofing,C/gps_spoofing,\\
 A/comm_disruption,B/comm_disruption,C/comm_disruption,\\
 A/command_injection,B/command_injection,C/command_injection
 
+    # B1 / H3: the 20 pre-registered flights (H3_PREREGISTRATION.md
+    # "Design"): architecture C + ranging, layers 5 m, attack at 90 s,
+    # observation 125 s (analysis window W = 120 s from t_target_set)
+    python scripts/run_batch.py --preset h3 --log-root runs_h3 --dry-run
+
 Exit code
 ---------
     0  — batch finished (individual trial failures are recorded, not fatal)
@@ -71,7 +76,15 @@ from typing import Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PX4_ROOT = Path.home() / "PX4-Autopilot"
 
-VALID_ARCHS = {"A", "B", "C"}
+VALID_ARCHS = {"A", "B", "C", "C_RANGING"}
+# Configurations whose recovery is enabled (non-default policy allowed).
+# C_RANGING = configs/architecture_c_ranging.yaml (C + B1 ranging detector).
+RECOVERY_ARCHS = {"C", "C_RANGING"}
+
+# B1 / H3 spoof-rate levels -> SIM_GPS_OFF_R. Mirrors
+# metrics.h3_analysis.LEVEL_RATES (equality guarded by a test; kept literal
+# so this driver stays importable without the package).
+LEVEL_RATES = {"L30": 0.02, "L10": 0.006667, "L3": 0.002, "L1": 0.0006667}
 # Mirrors core.config.VALID_RECOVERY_POLICIES (equality guarded by a test;
 # kept literal so this driver stays importable without the package).
 VALID_POLICIES = {"proportionate", "trust_aware", "detect_only"}
@@ -110,11 +123,19 @@ class Cell:
     # the key so two arms of the same cell never shadow each other on
     # resume (C/gps_spoofing@trust_aware != C/gps_spoofing@detect_only).
     policy: Optional[str] = None
+    # Spoof-rate level (B1 / H3), e.g. "L1". None = v1 (OFF_R untouched).
+    level: Optional[str] = None
 
     @property
     def key(self) -> str:
         base = f"{self.arch}/{self.attack}"
+        if self.level is not None:
+            base = f"{base}:{self.level}"
         return base if self.policy is None else f"{base}@{self.policy}"
+
+    @property
+    def spoof_rate(self) -> Optional[float]:
+        return None if self.level is None else LEVEL_RATES[self.level]
 
 
 def parse_cells(spec: str) -> list[Cell]:
@@ -124,7 +145,7 @@ def parse_cells(spec: str) -> list[Cell]:
         if not raw:
             continue
         if "/" not in raw:
-            raise ValueError(f"bad cell {raw!r}, expected ARCH/ATTACK[@POLICY]")
+            raise ValueError(f"bad cell {raw!r}, expected ARCH/ATTACK[:LEVEL][@POLICY]")
         policy: Optional[str] = None
         body = raw
         if "@" in raw:
@@ -135,13 +156,20 @@ def parse_cells(spec: str) -> list[Cell]:
         arch, attack = body.split("/", 1)
         arch = arch.strip().upper()
         attack = attack.strip()
+        level: Optional[str] = None
+        if ":" in attack:
+            attack, level = (x.strip() for x in attack.split(":", 1))
+            if level not in LEVEL_RATES:
+                raise ValueError(f"bad level {level!r} in {raw!r}")
         if arch not in VALID_ARCHS:
             raise ValueError(f"bad arch {arch!r} in {raw!r}")
         if attack not in VALID_ATTACKS:
             raise ValueError(f"bad attack {attack!r} in {raw!r}")
-        if policy not in (None, "proportionate") and arch != "C":
+        if level is not None and "gps_spoofing" not in attack.split("+"):
+            raise ValueError(f"level {level!r} needs a gps_spoofing attack: {raw!r}")
+        if policy not in (None, "proportionate") and arch not in RECOVERY_ARCHS:
             raise ValueError(f"policy {policy!r} needs architecture C: {raw!r}")
-        cells.append(Cell(arch, attack, policy))
+        cells.append(Cell(arch, attack, policy, level))
     if not cells:
         raise ValueError("no cells parsed")
     return cells
@@ -165,6 +193,8 @@ class TrialRecord:
     log_dir: str
     started_at: float
     policy: Optional[str] = None
+    level: Optional[str] = None
+    spoof_rate: Optional[float] = None
 
 
 def load_completed(manifest_path: Path) -> set[tuple[str, int]]:
@@ -296,33 +326,12 @@ def run_trial(
     args: argparse.Namespace,
     log_root: Path,
 ) -> TrialRecord:
-    arm = "" if cell.policy is None else f"_{cell.policy}"
-    run_id = f"{cell.arch}_{cell.attack}{arm}_r{replicate}_{int(time.time())}"
+    run_id = trial_run_id(cell, replicate, int(time.time()))
     log_dir = log_root / f"run_{run_id}"
     started = time.time()
-
-    cmd = [
-        sys.executable,
-        "scripts/run_one.py",
-        "--arch", cell.arch.lower(),
-        "--attack", cell.attack,
-        "--mission", "mavsdk",
-        "--target-uav", args.target_uav,
-        "--attack-at-sec", str(args.attack_at_sec),
-        "--observation-after-attack-sec", str(args.obs_sec),
-        "--log-root", str(log_root),
-        "--run-id", run_id,
-        "--px4-pid-file", args.px4_pid_file,
-    ]
-
-    if args.mesh_loss_prob is not None:
-        cmd += ["--mesh-loss-prob", str(args.mesh_loss_prob)]
-    if args.mesh_loss_seed is not None:
-        cmd += ["--mesh-loss-seed", str(args.mesh_loss_seed)]
-    if cell.policy is not None:
-        cmd += ["--recovery-policy", cell.policy]
-    if args.altitude_layer_step is not None:
-        cmd += ["--altitude-layer-step", str(args.altitude_layer_step)]
+    cmd = trial_command(cell, args, log_root, run_id)
+    rec_extra = {"policy": cell.policy, "level": cell.level,
+                 "spoof_rate": cell.spoof_rate}
     # Full simulator relaunch around every trial.
     cleanup()
     time.sleep(args.settle)
@@ -332,7 +341,7 @@ def run_trial(
             cell_key=cell.key, replicate=replicate, run_id=run_id,
             arch=cell.arch, attack=cell.attack, status="launch_failed",
             exit_code=None, duration_sec=time.time() - started,
-            log_dir=str(log_dir), started_at=started, policy=cell.policy,
+            log_dir=str(log_dir), started_at=started, **rec_extra,
         )
 
     # Post-launch settle: let the simulator + mesh fully establish
@@ -357,8 +366,44 @@ def run_trial(
         cell_key=cell.key, replicate=replicate, run_id=run_id,
         arch=cell.arch, attack=cell.attack, status=status,
         exit_code=exit_code, duration_sec=time.time() - started,
-        log_dir=str(log_dir), started_at=started, policy=cell.policy,
+        log_dir=str(log_dir), started_at=started, **rec_extra,
     )
+
+
+def trial_run_id(cell: Cell, replicate: int, ts: int) -> str:
+    arm = "" if cell.policy is None else f"_{cell.policy}"
+    lvl = "" if cell.level is None else f"_{cell.level}"
+    return f"{cell.arch}_{cell.attack}{lvl}{arm}_r{replicate}_{ts}"
+
+
+def trial_command(cell: Cell, args: argparse.Namespace, log_root: Path,
+                  run_id: str) -> list[str]:
+    """The run_one invocation for one trial (pure; no side effects)."""
+    cmd = [
+        sys.executable,
+        "scripts/run_one.py",
+        "--arch", cell.arch.lower(),
+        "--attack", cell.attack,
+        "--mission", "mavsdk",
+        "--target-uav", args.target_uav,
+        "--attack-at-sec", str(args.attack_at_sec),
+        "--observation-after-attack-sec", str(args.obs_sec),
+        "--log-root", str(log_root),
+        "--run-id", run_id,
+        "--px4-pid-file", args.px4_pid_file,
+    ]
+
+    if args.mesh_loss_prob is not None:
+        cmd += ["--mesh-loss-prob", str(args.mesh_loss_prob)]
+    if args.mesh_loss_seed is not None:
+        cmd += ["--mesh-loss-seed", str(args.mesh_loss_seed)]
+    if cell.policy is not None:
+        cmd += ["--recovery-policy", cell.policy]
+    if args.altitude_layer_step is not None:
+        cmd += ["--altitude-layer-step", str(args.altitude_layer_step)]
+    if cell.spoof_rate is not None:
+        cmd += ["--spoof-rate", str(cell.spoof_rate)]
+    return cmd
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +501,65 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
              "needed for reliable GPS-spoof injection under high mesh "
              "loss)",
     )
+    p.add_argument(
+        "--preset", default=None, choices=["h3"],
+        help="h3 = the 20 pre-registered B1 flights (H3_PREREGISTRATION.md "
+             "'Design'); fixes cells, replicates, order and timing, and "
+             "ignores --cells / -n / --order.",
+    )
     return p.parse_args(argv)
+
+
+# ---------------------------------------------------------------------------
+# B1 / H3 preset
+# ---------------------------------------------------------------------------
+
+H3_ATTACK_AT_SEC = 90.0
+H3_OBS_SEC = 125.0
+"""Analysis window W = 120 s runs from t_target_set (the OFF_N write), which
+lags the runner's inject marker by the OFF_R round trips; 5 s margin so
+the window is always inside the observation."""
+H3_LAYER_STEP_M = 5.0
+H3_NO_ATTACK = Cell("C_RANGING", "none", "detect_only")
+H3_ATTACK_CELLS: list[tuple[Cell, int]] = [
+    (Cell("C_RANGING", "gps_spoofing", "detect_only", "L1"), 5),
+    (Cell("C_RANGING", "gps_spoofing", "detect_only", "L3"), 2),
+    (Cell("C_RANGING", "gps_spoofing", "detect_only", "L10"), 2),
+    (Cell("C_RANGING", "gps_spoofing", "detect_only", "L30"), 2),
+    (Cell("C_RANGING", "detector_takeout+gps_spoofing", "detect_only", "L1"), 2),
+    (Cell("C_RANGING", "gps_spoofing", "proportionate", "L1"), 2),
+    (Cell("C_RANGING", "gps_spoofing", "trust_aware", "L1"), 2),
+]
+
+
+def h3_trials() -> list[tuple[Cell, int]]:
+    """The 20 H3 flights in order. No-attack flights first, in the middle
+    and last. Attack cells interleaved replicate-major, generalised to
+    unequal n: replicate r of a cell with n replicates sits at (r - 0.5)/n
+    of the series, so the 5 L1 flights spread over the whole batch instead
+    of piling up at its end."""
+    slots = []
+    for idx, (cell, n) in enumerate(H3_ATTACK_CELLS):
+        for r in range(1, n + 1):
+            slots.append(((r - 0.5) / n, idx, cell, r))
+    attack = [(c, r) for _f, _i, c, r in sorted(slots, key=lambda s: (s[0], s[1]))]
+    mid = len(attack) // 2
+    return ([(H3_NO_ATTACK, 1)] + attack[:mid] + [(H3_NO_ATTACK, 2)]
+            + attack[mid:] + [(H3_NO_ATTACK, 3)])
+
+
+def apply_preset(args: argparse.Namespace) -> Optional[list[tuple[Cell, int]]]:
+    """Fix the preset's timing on args; return its trial list (None = no
+    preset, args untouched)."""
+    if args.preset is None:
+        return None
+    if args.preset == "h3":
+        args.attack_at_sec = H3_ATTACK_AT_SEC
+        args.obs_sec = H3_OBS_SEC
+        args.altitude_layer_step = H3_LAYER_STEP_M
+        args.target_uav = "uav_0"
+        return h3_trials()
+    raise ValueError(f"bad preset {args.preset!r}")
 
 
 def apply_default_policy(cells: list[Cell], policy: Optional[str]) -> list[Cell]:
@@ -465,7 +568,7 @@ def apply_default_policy(cells: list[Cell], policy: Optional[str]) -> list[Cell]
         return cells
     out = [c if c.policy is not None else replace(c, policy=policy) for c in cells]
     for c in out:
-        if c.policy not in (None, "proportionate") and c.arch != "C":
+        if c.policy not in (None, "proportionate") and c.arch not in RECOVERY_ARCHS:
             raise ValueError(f"policy {c.policy!r} needs architecture C: {c.key}")
     return out
 
@@ -485,18 +588,24 @@ def build_trials(cells: list[Cell], n: int, order: str) -> list[tuple[Cell, int]
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
-    cells = apply_default_policy(parse_cells(args.cells), args.recovery_policy)
+    preset = apply_preset(args)
+    if preset is not None:
+        trials = preset
+        cells = list(dict.fromkeys(c for c, _r in trials))
+        _log(f"preset {args.preset}: cells, replicates, order and timing fixed")
+    else:
+        cells = apply_default_policy(parse_cells(args.cells), args.recovery_policy)
+        trials = build_trials(cells, args.runs_per_cell, args.order)
     log_root = args.log_root.resolve()
     manifest_path = log_root / "batch_manifest.jsonl"
-
-    trials = build_trials(cells, args.runs_per_cell, args.order)
     total = len(trials)
     est_min = total * (args.attack_at_sec + args.obs_sec + 45) / 60.0
 
     _log(f"batch root: {log_root}")
     _log(f"cells: {[c.key for c in cells]}")
     _log(
-        f"replicates/cell: {args.runs_per_cell}  total trials: {total}  "
+        f"replicates/cell: {'preset' if preset else args.runs_per_cell}  "
+        f"total trials: {total}  "
         f"est wall time: ~{est_min:.0f} min"
     )
     _log(
@@ -509,19 +618,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"  {CLEANUP_CMD}")
         _log("--dry-run: launch command per trial:")
         print(f"  {LAUNCH_CMD}")
-        _log("--dry-run: run_one invocation per trial (example, cell 1):")
-        c0 = cells[0]
-        example = [
-            sys.executable, "scripts/run_one.py",
-            "--arch", c0.arch.lower(), "--attack", c0.attack,
-            "--mission", "mavsdk", "--target-uav", args.target_uav,
-            "--attack-at-sec", str(args.attack_at_sec),
-            "--observation-after-attack-sec", str(args.obs_sec),
-            "--log-root", str(log_root),
-            "--run-id", f"{c0.arch}_{c0.attack}_r1_<ts>",
-            "--px4-pid-file", args.px4_pid_file,
-        ] + (["--recovery-policy", c0.policy] if c0.policy else [])
-        print("  " + " ".join(example))
+        _log("--dry-run: trial plan:")
+        for i, (c, r) in enumerate(trials, 1):
+            print(f"  {i:3d}. {c.key} r{r}")
+        _log("--dry-run: run_one invocation per trial (example, trial 1):")
+        c0, r0 = trials[0]
+        example = trial_command(c0, args, log_root, trial_run_id(c0, r0, 0))
+        print("  " + " ".join(example).replace("_r1_0", "_r1_<ts>"))
         _log("--dry-run: no processes started, no files written.")
         return 0
 

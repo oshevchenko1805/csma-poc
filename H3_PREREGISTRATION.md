@@ -431,6 +431,17 @@ attack flights).
    - `python3 -m metrics.h3_analysis <root>` prints only the batch
      status (counts, exclusions); `--final` computes the metrics.]
 9. `run_batch`: spoof-rate option, cells for the C-ranging config.
+   [Implementation, before any flight: `run_one --arch c_ranging
+   --spoof-rate r --range-seed s` (seed default: crc32 of the run id,
+   logged as run_summary.range_source); `run_batch --preset h3` fixes
+   the 20 flights, attack at 90 s, layers 5 m and an observation of
+   125 s: the analysis window W = 120 s starts at t_target_set, which
+   lags the runner's marker by the OFF_R round trips, so 5 s margin.
+   Order: no-attack flights 1st, 10th and 20th; attack cells
+   replicate-major, generalised to unequal n (replicate r of n at
+   (r - 0.5)/n), so the 5 L1 flights spread over the batch. Every
+   flight has its own replicate number; a re-flown excluded flight gets
+   the next free number of its cell.]
 
 ## Amendments
 
