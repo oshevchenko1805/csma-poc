@@ -14,6 +14,8 @@ Fig. 3.3  Testbed deployment for one UAV i (п. 3.6.2, table 3.16):
 Fig. 3.4  Sequence of the self-healing loop in C for a spoof of uav_0
           detected by a neighbour (п. 3.6.5): alarm, isolation announce,
           coordinator election, recovery request, action, acknowledgement.
+Fig. 3.5  Data pipeline from a run on the testbed to the tables and
+          figures of Ch. 4 (п. 3.6.7).
 Fig. 3.2  Placement of monitors and failure domains in architectures A,
           B and C (п. 3.3.3), with the properties O1–O3 of the operational
           CSMA definition (п. 3.2.1) under each panel.
@@ -582,6 +584,105 @@ def fig_sequence(outdir: str) -> None:
     _save(fig, outdir, "fig3_4_sequence")
 
 
+
+# ------------------------------------------------------------------ Fig. 3.5
+
+# id: (label, x, y, w, h, kind) — kind: file | step | ref | out
+PIPE = {
+    "ev": ("Журнали подій", 0.08, 2.78, 1.24, 0.38, "file"),
+    "est": ("Ряди оцінювача\n(монітори)", 0.08, 2.28, 1.24, 0.42, "file"),
+    "traj": ("Істинна траєкторія\n(Gazebo)", 0.08, 1.78, 1.24, 0.42, "file"),
+    "sum": ("Підсумок прогону", 0.08, 1.32, 1.24, 0.38, "file"),
+    "valid": ("Перевірка\nвалідності", 1.58, 2.02, 0.92, 0.46, "step"),
+    "master": ("Зведений файл:\nусі прогони і\nпричини виключення", 2.72, 1.95, 1.30, 0.60, "file"),
+    "metrics": ("Модулі метрик\n→ проміжні CSV", 4.24, 2.02, 1.10, 0.46, "step"),
+    "gen": ("Генератори\nтаблиць\nі рисунків", 5.56, 1.97, 0.94, 0.56, "step"),
+    "ch4": ("Розділ 4", 5.56, 0.95, 0.94, 0.36, "out"),
+    "arch": ("Архіви сирих даних\n+ SHA-256", 0.08, 0.25, 1.24, 0.42, "ref"),
+    "prereg": ("Попередня реєстрація\n(H2, серія меж, H3, карта)", 2.40, 0.25, 1.62, 0.42, "ref"),
+    "rules": ("Правила рішення\n(функції в коді)", 4.24, 0.25, 1.10, 0.42, "step"),
+}
+
+PIPE_EDGES = [
+    ("ev", "valid"), ("est", "valid"), ("traj", "valid"), ("sum", "valid"),
+    ("valid", "master"), ("master", "metrics"), ("metrics", "gen"), ("gen", "ch4"),
+    ("prereg", "rules"), ("rules", "metrics"),
+]
+
+
+def fig_pipeline(outdir: str) -> None:
+    y0, y1 = 0.0, 3.62
+    fig = plt.figure(figsize=(WIDTH_IN + 0.05, y1 - y0))
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(-0.02, WIDTH_IN + 0.03)
+    ax.set_ylim(y0, y1)
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    styles = {
+        "file": dict(fc="white", ec=LINE, lw=0.8, rounded=False),
+        "step": dict(fc=DET_FILL, ec=DET_EDGE, lw=1.0, rounded=True),
+        "ref": dict(fc="#f3f2ee", ec=LINE, lw=0.8, rounded=False),
+        "out": dict(fc="white", ec=INK, lw=1.2, rounded=False),
+    }
+    # the run
+    ax.add_patch(Rectangle((0.02, 1.22), 1.36, 2.05, fill=False, ec=INK_2, lw=0.8,
+                           ls=(0, (4, 2))))
+    ax.text(0.04, 3.33, "Прогон", fontsize=8, color=INK_2, va="bottom",
+            fontweight="bold")
+
+    for k, (label, x, y, w, h, kind) in PIPE.items():
+        s = styles[kind]
+        ax.add_patch(FancyBboxPatch((x, y), w, h,
+                                    boxstyle="round,pad=0,rounding_size=0.06" if s["rounded"]
+                                    else "square,pad=0",
+                                    facecolor=s["fc"], edgecolor=s["ec"], linewidth=s["lw"],
+                                    zorder=3))
+        ax.text(x + w / 2, y + h / 2, label, ha="center", va="center", fontsize=8,
+                color=INK, zorder=4, linespacing=1.05,
+                fontweight="bold" if kind == "out" else "normal")
+
+    def pt(k, side):
+        _l, x, y, w, h, _k = PIPE[k]
+        return {"l": (x, y + h / 2), "r": (x + w, y + h / 2),
+                "t": (x + w / 2, y + h), "b": (x + w / 2, y)}[side]
+
+    def arrow(a, b, color=LINE, conn="arc3", ls="-"):
+        ax.add_patch(FancyArrowPatch(a, b, arrowstyle="-|>", mutation_scale=7,
+                                     color=color, lw=0.9, linestyle=ls,
+                                     connectionstyle=conn, shrinkA=1, shrinkB=1,
+                                     zorder=2))
+
+    vx, vy = pt("valid", "l")
+    for k in ("ev", "est", "traj", "sum"):
+        arrow(pt(k, "r"), (vx, vy))
+    arrow(pt("valid", "r"), pt("master", "l"))
+    arrow(pt("master", "r"), pt("metrics", "l"))
+    arrow(pt("metrics", "r"), pt("gen", "l"))
+    arrow(pt("gen", "b"), pt("ch4", "t"))
+    arrow(pt("prereg", "r"), pt("rules", "l"))
+    arrow(pt("rules", "t"), pt("metrics", "b"))
+    arrow((0.70, 1.22), pt("arch", "t"))
+
+    def note(x, y, text, ha="center", va="top"):
+        ax.text(x, y, text, fontsize=7.5, color=INK_2, ha=ha, va=va,
+                style="italic", linespacing=1.05)
+
+    _l, x, y, w, h, _k = PIPE["valid"]
+    note(x + w / 2, y - 0.05, "критерії п. 3.5.3;\nодне визначення\nв коді")
+    _l, x, y, w, h, _k = PIPE["metrics"]
+    note(x + w / 2, y + h + 0.05, "фізичні наслідки,\nзіткнення, координація,\nmesh, тривоги",
+         va="bottom")
+    gx, gy = pt("gen", "b")
+    cy = (gy + pt("ch4", "t")[1]) / 2
+    note(gx - 0.06, cy, "без ручного\nпереписування", ha="right", va="center")
+    note(0.77, 1.00, "у git — лише підсумок", ha="left", va="center")
+    _l, x, y, w, h, _k = PIPE["prereg"]
+    note(x + w / 2, y - 0.05, "зафіксовано в репозиторії до першого прогону")
+
+    _save(fig, outdir, "fig3_5_pipeline")
+
+
 def _save(fig, outdir: str, name: str) -> None:
     os.makedirs(outdir, exist_ok=True)
     for ext in ("png", "pdf"):
@@ -600,6 +701,7 @@ def main(argv=None) -> int:
     fig_architectures(args.outdir)
     fig_deployment(args.outdir)
     fig_sequence(args.outdir)
+    fig_pipeline(args.outdir)
     return 0
 
 

@@ -84,3 +84,37 @@ def test_sequence_figure_renders_and_pdf_is_deterministic(tmp_path):
     a = (tmp_path / "a" / "fig3_4_sequence.pdf").read_bytes()
     b = (tmp_path / "b" / "fig3_4_sequence.pdf").read_bytes()
     assert len(a) > 0 and a == b
+
+
+def _reach(start):
+    seen, todo = set(), [start]
+    while todo:
+        n = todo.pop()
+        for s, d in F.PIPE_EDGES:
+            if s == n and d not in seen:
+                seen.add(d)
+                todo.append(d)
+    return seen
+
+
+def test_pipeline_edges_connect_known_boxes():
+    for s, d in F.PIPE_EDGES:
+        assert s in F.PIPE and d in F.PIPE, (s, d)
+
+
+def test_pipeline_every_run_file_reaches_chapter_4_through_validation():
+    for f in ("ev", "est", "traj", "sum"):
+        assert ("valid" in _reach(f)) and ("ch4" in _reach(f)), f
+        # nothing skips the validity check
+        assert [d for s, d in F.PIPE_EDGES if s == f] == ["valid"]
+    # chapter 4 is fed only by the generators, the metrics only after the master file
+    assert [s for s, d in F.PIPE_EDGES if d == "ch4"] == ["gen"]
+    assert {s for s, d in F.PIPE_EDGES if d == "metrics"} == {"master", "rules"}
+    # pre-registration enters only as decision rules in code
+    assert [d for s, d in F.PIPE_EDGES if s == "prereg"] == ["rules"]
+
+
+def test_pipeline_figure_renders(tmp_path):
+    F.fig_pipeline(str(tmp_path))
+    for ext in ("png", "pdf"):
+        assert os.path.getsize(tmp_path / ("fig3_5_pipeline." + ext)) > 0
