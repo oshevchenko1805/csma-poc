@@ -97,6 +97,26 @@
 
 **Итог партии 4:** 10 из 10 существуют; 9 рецензированы, 1 препринт (L№5). Главная находка: у **L№2 (Spyros)** название и год в списке не соответствуют статье — исправить по DOI (2026). L№6 и L№8 вышли в журналах — статус препринта снят.
 
+### A, партия 5 (L№11–20) — проверено 28.09 по Crossref (в т. ч. по PII из ссылок раздела 2)
+
+| L№ | Проверка | Полные выходные данные (сверено) | Что изменилось относительно списка |
+|---|---|---|---|
+| 11 | **испр** | Alhoraibi L., Alghazzawi D., Alhebshi R. Detection of GPS Spoofing Attacks in UAVs Based on Adversarial Machine Learning Model. *Sensors*. 2024. Vol. 24, No. 18. Art. 6156. DOI: 10.3390/s24186156 | Авторы, DOI |
+| 12 | **испр — название и журнал** | Abdullayeva F., Valikhanli O. Multimodal deep neural network for UAV GPS jamming attack detection. *Cyber Security and Applications*. 2025. Vol. 3. Art. 100094. DOI: 10.1016/j.csa.2025.100094 | В названии нет слова «framework»; журнал найден (был «Elsevier») |
+| 13 | **испр — название** | Kfir T., Tuvyahu S., Ben Moshe B., Anidjar O. H. Real-time detection of acoustic anomalies in drone servo motors using edge-based machine learning. *Machine Learning with Applications*. 2025. Vol. 22. Art. 100755. DOI: 10.1016/j.mlwa.2025.100755 | «(TinyML)» в названии нет; авторы, том |
+| 14 | **испр — площадка** | Andreoni Lopez M., Baddeley M., Lunardi W. T., Pandey A., Giacalone J.-P. Towards Secure Wireless Mesh Networks for UAV Swarm Connectivity: Current Threats, Research, and Opportunities. *2021 17th International Conference on Distributed Computing in Sensor Systems (DCOSS)*. 2021. P. 319–326. DOI: 10.1109/DCOSS52077.2021.00059 | Фамилия автора — **Andreoni Lopez** (в тексте «Lopez et al.» → «Andreoni Lopez et al.»); площадка DCOSS вместо «IEEE»; DOI вместо PDF с личного сайта |
+| 15 | **испр — журнал** | Amponis G., Lagkas T., Sarigiannidis P., Vitsas V., Fouliras P., Wan S. A survey on FANET routing from a cross-layer design perspective. *Journal of Systems Architecture*. 2021. Vol. 120. Art. 102281. DOI: 10.1016/j.sysarc.2021.102281 | **Подозрение подтвердилось:** журнал — Journal of Systems Architecture, не Computer Communications |
+| 16 | **испр** | Almansor M. J., Din N. M., Baharuddin M. Z., Ma M., Alsayednoor H. M., Al-Shareeda M. A., Al-asadi A. J. Routing protocols strategies for flying Ad-Hoc network (FANET): Review, taxonomy, and open research issues. *Alexandria Engineering Journal*. 2024. Vol. 109. P. 553–577. DOI: 10.1016/j.aej.2024.09.032 | Авторы, том, страницы, DOI |
+| 17 | **испр** | Lu Y., Wen W., Igorevich K. K., Ren P., Zhang H., Duan Y., Zhu H., Zhang P. UAV Ad Hoc Network Routing Algorithms in Space–Air–Ground Integrated Networks: Challenges and Directions. *Drones*. 2023. Vol. 7, No. 7. Art. 448. DOI: 10.3390/drones7070448 | Авторы, DOI; в тексте не цитируется |
+| 18 | **испр — название** | Phadke A., Medrano F. A. Examining application-specific resiliency implementations in UAV swarm scenarios. *Intelligence & Robotics*. 2023. Vol. 3, No. 3. P. 436–461. DOI: 10.20517/ir.2023.27 | Название: «…in UAV swarm scenarios» (в списке «…for UAV swarms»); журнал, том, страницы |
+| 19 | **испр — название** | Phadke A., Medrano F. A. Towards Resilient UAV Swarms—A Breakdown of Resiliency Requirements in UAV Swarms. *Drones*. 2022. Vol. 6, No. 11. Art. 340. DOI: 10.3390/drones6110340 | Полное название (было обрезано) |
+| 20 | **испр** | Johnphill O., Sadiq A. S., Al-Obeidat F., Al-Khateeb H., Taheir M. A., Kaiwartya O., Ali M. Self-Healing in Cyber–Physical Systems Using Machine Learning: A Critical Analysis of Theories and Tools. *Future Internet*. 2023. Vol. 15, No. 7. Art. 244. DOI: 10.3390/fi15070244 | Авторы, DOI |
+
+Попутно по PII из раздела 2 (2.7, 2.9) подтвердилось подозрение для **L№25 Ramos-Cruz**: журнал — *Neurocomputing*. 2024. Vol. 581. Art. 127427. DOI: 10.1016/j.neucom.2024.127427 (не Applied Soft Computing). Авторы: Ramos-Cruz B., Andreu-Perez J., Martínez L. — заносится в партию 6.
+
+**Итог партии 5:** 10 из 10 существуют и рецензированы. Исправления: журнал у L№15 (и L№25), площадка и фамилия у L№14, названия у L№12, 13, 18, 19.
+
+
 
 ---
 
@@ -220,5 +240,5 @@ Flueratoru 2020 GLOBECOM (Q6) — конференционная версия B�
 | 2 | C№1–12 — **готово 28.09** | спуфинг, обход EKF, восстановление — ядро новизны |
 | 3 | C№13–21 — **готово 28.09** | архитектуры, кооперативная локализация, UWB |
 | 4 | L№1–10 — **готово 28.09** | |
-| 5 | L№11–20 | |
+| 5 | L№11–20 — **готово 28.09** | |
 | 6 | L№21–30 | |
