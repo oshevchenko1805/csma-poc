@@ -489,4 +489,85 @@ attack flights).
 
 ## Results
 
-(empty until the flights)
+Flights 2026-09-27/28, code at 52e3d97 (VM). Amendments: none (two
+wording corrections were made before any flight, marked in place).
+Raw data (not in git): h3_raw.tar.gz SHA-256
+a1746b37b5867b5e55f284e18d74611a88eb0c38e7dd5e65c2ef31f66d2483aa;
+technical flight h3_smoke_raw.tar.gz SHA-256
+647c6bcaff88b57d3c6f7278123d7c07685b21877275c661eee7b3dd4fc5d65d
+(item 10: PASS on every setup field; its alarms were not read).
+`python3 -m metrics.h3_analysis runs_h3 --final` (rows in
+runs_h3/h3_rows.json); re-run on the Mac copy of the archive gives the
+same verdict.
+
+Status: 20/20 included, 0 excluded, 0 unplanned, 0 config problems,
+0 duplicate seeds. 0 contacts (min peer separation 4.8-5.6 m).
+
+**H3: CONFIRMED.** L1 5/5 pass, Wilson 95 % [0.57, 1.00]; 0 ranging
+alarms in the 3 no-attack flights; gps and cross_check silent in all 5
+L1 flights (blind zone reproduced with 3 UAVs); 0 ranging alarms before
+injection.
+
+Per flight (t in s from t_target_set; harm = harm_at_alarm_m):
+
+| cell | r | t_rng_peer | t_rng_self | harm | t_gps | t_cc | t_jump | t_action | misattr. |
+|---|---|---|---|---|---|---|---|---|---|
+| L1 | 1 | 8.43 | 9.49 | 5.45 | - | - | 37.01 | - | 0 |
+| L1 | 2 | 7.55 | 8.60 | 4.64 | - | - | 37.22 | - | 0 |
+| L1 | 3 | 9.58 | 9.59 | 6.41 | - | - | 37.02 | - | 0 |
+| L1 | 4 | 7.20 | 8.25 | 4.49 | - | - | 37.01 | - | 0 |
+| L1 | 5 | 9.54 | 9.60 | 6.37 | - | - | 37.06 | - | 0 |
+| L3 | 1 | 6.48 | 8.49 | 3.87 | 6.18 | - | 13.21 | - | 1 (uav_0 -> uav_1, 6.47) |
+| L3 | 2 | 7.62 | 8.72 | 3.71 | 6.20 | - | 13.36 | - | 0 |
+| L10 | 1 | 7.65 | 7.70 | 35.12 | 3.13 | - | 4.77 | - | 0 |
+| L10 | 2 | 7.43 | 10.50 | 34.61 | 2.94 | - | 4.62 | - | 0 |
+| L30 | 1 | 9.56 | 9.60 | 49.32 | 2.94 | 7.56 | 7.33 | - | 0 |
+| L30 | 2 | 7.40 | 7.44 | 48.34 | 2.76 | 5.39 | 5.28 | - | 0 |
+| DT+L1 | 1 | 8.52 | - | 5.66 | - | - | 37.18 | - | 0 |
+| DT+L1 | 2 | 7.33 | - | 4.43 | - | - | 37.05 | - | 0 |
+| L1@proportionate | 1 | 7.51 | 8.55 | 4.72 | - | - | 37.01 | 8.55 | 0 |
+| L1@proportionate | 2 | 9.63 | 10.66 | 6.44 | - | - | 37.07 | 9.66 | 0 |
+| L1@trust_aware | 1 | 9.52 | 9.57 | 6.38 | - | - | 36.96 | 9.55 | 0 |
+| L1@trust_aware | 2 | 9.53 | 9.53 | 6.40 | - | - | 37.00 | 9.57 | 0 |
+| no-attack | 1-3 | - | - | - | - | - | - | - | 0 alarms |
+
+Against the predictions:
+- L1 ([2c]): t_rng_peer median 8.43 s (predicted 9, p5-p95 8-10, range
+  7-10); harm median 5.45 m, max 6.41 m (predicted 5.9, p5-p95 5.1-6.6,
+  max 6.6); worst margin to H_max 0.39 m (model 0.2 m); t_rng_self
+  8.25-9.60 s (predicted 9-10, range 8-11); 0 misattributions. Ranging
+  alarms ~28 s before the estimate error crosses the jump threshold.
+- P-B1-2 (L10, L30): **HOLDS**. t_rng - t_jump = +2.88, +2.82, +2.23,
+  +2.12 s (predicted +2...3 s; falsified only if < -0.5 s). gps first
+  (2.76-3.13 s; predicted 2.6 / 3.7 s); harm ~ the jump (34.6-49.3 m;
+  predicted 41 / 49 m).
+- L3: ranging 6.48 / 7.62 s before the jump (13.2 / 13.4 s), harm 3.87 /
+  3.71 m (predicted 8 s, 3.7 m). gps at 6.18 / 6.20 s, i.e. at the same
+  time or earlier (predicted: local gps first at L3). One misattribution
+  by the victim's own monitor (uav_1 at 6.47 s, before its self flag at
+  8.49 s); the peers' monitors flagged uav_0 at 6.48 s. This is the
+  stated [2c] limit (model 34/5200 runs, 6-7 s); 1 of 2 flights here, a
+  frequency cannot be read from n = 2.
+- P-B1-3 (DT + L1): peer path alone detects at 8.52 / 7.33 s, harm 5.66 /
+  4.43 m (predicted ~9 s, ~5.8 m); self path silent (taken out); gps and
+  cross_check silent.
+- nav_error_end ~ offset(W) in every attack flight (44.7-50.0 m vs
+  45.3-50.0 m): no arm repairs navigation. As predicted.
+- P-B1-8 (S3), as pre-registered (drift over [t_ack, t0 + W], W = 120 s):
+  proportionate 46.62 / 46.08 m (predicted ~39 m); trust_aware 9.63 /
+  9.62 m, **above the stated 7.91 m: this prediction is not met.**
+  creep_mps trust_aware 0.063 / 0.057 (< 0.5, so not the "limit of H2"
+  case), proportionate 0.29 / 0.28; vel_err_mps 0.06 in all four;
+  action failures 0; trust_aware / proportionate drift ratio ~4.8.
+
+POST-HOC (exploratory, written after these results; not part of the
+decision): `scripts/h3_posthoc_s3_windows.py`. The 7.91 m bound was
+calibrated for the H2 window (60 s from injection); the prediction
+applied it to W = 120 s. Same drift, truncated at t0 + 30 / 60 / 90 /
+120 s: trust_aware 4.19 / 7.08 / 8.72 / 9.63 and 4.58 / 7.26 / 8.80 /
+9.62 m; proportionate 22.2 / 35.4 / 42.7 / 46.6 and 21.6 / 34.8 / 42.1 /
+46.1 m. On the H2 window trust_aware is within the bound (7.1-7.3 m),
+but the drift keeps growing after it (+2.4 m over the next 60 s),
+consistent with the zero-velocity hold following an EKF velocity that
+carries part of a slow, absorbed spoof (creep ~ vel_err ~ 0.06 m/s).
+Under the fast spoofs of H2 the same action drifted 1.5 m.
