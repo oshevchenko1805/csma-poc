@@ -654,3 +654,94 @@ but the drift keeps growing after it (+2.4 m over the next 60 s),
 consistent with the zero-velocity hold following an EKF velocity that
 carries part of a slow, absorbed spoof (creep ~ vel_err ~ 0.06 m/s).
 Under the fast spoofs of H2 the same action drifted 1.5 m.
+
+### Offline coverage map (step 4; rules: "Offline coverage map" + A1)
+
+Code 32d9036 (`python3 -m metrics.h3_offline_map --h3 runs_h3 --stage3
+runs_stage3 --check` / `--map`), run 2026-09-28 on the Mac copies of
+h3_raw (a1746b37...) and stage3_raw (c419d204...). Outputs (not in git):
+h3_map.json SHA-256
+7bdc210a931f879b3c8964244b41d0bd45204f4d63041b3b4c37422b07feecf9,
+h3_map_check.json SHA-256
+ba9584e37eacfdcbb3bf57a0a013a4d76e1f222852dabd45da3ffff69d27a956.
+Input: 14 S1 flights; calibration 130 stage-3 runs (1 gated, as in [2b]).
+
+**Replay check (A1.8): PASS.** sigma 0, b 0.2, theta 1.8 / 1.3, 50 seeds:
+peer-path detection 100 % in all 11 attack flights; |median offline
+t_rng_peer - live| <= 0.84 s (L1 r5: 8.70 vs 9.54 s); 0 alarms in 150
+no-attack replays (6.9 h). Not criteria: t_rng_self offline vs live
+within 1 s except L10 r2 (7.4 vs 10.5 s, the live value is the late
+one); the live L3 r1 misattribution did not recur in 50 replays
+(consistent with the [2c] model rate, 0.65 %). The [2b] calibration is
+reproduced by the same code with the [2b] keys: max 1.242 m -> 1.8 / 1.3.
+
+**Calibration theta / theta_ok (m)**, 50 seeds, "map-cal" keys:
+
+| sigma per axis | b = 0 | b = 0.2 | b = 0.4 |
+|---|---|---|---|
+| 0 | 1.6 / 1.1 | 1.8 / 1.3 | 2.0 / 1.5 |
+| 0.5 | 3.6 / 3.1 | 3.8 / 3.3 | 4.0 / 3.5 |
+| 1.5 | 9.3 / 8.8 | 9.1 / 8.6 | 8.9 / 8.4 |
+| 3 | 18.4 / 17.9 | 18.2 / 17.7 | 18.0 / 17.5 |
+
+theta ~ 6 sigma: with tau = 60 s the GNSS error is almost constant over
+3 announcements, so k = 3 does not filter it, and the max rule puts
+theta beyond the tail of the relative error of two UAVs. b hardly
+matters (absorbed by the calibration).
+
+**Map, b = 0.2 m** (b = 0 and 0.4 differ by <= 1 m in harm; full table
+in h3_map.json). Per level: 5 (L1) or 2 flights x 50 seeds. Peer-path
+detection within W = 100 % in every cell. False alarms: 0 in every cell
+(150 no-attack replays, 6.9 h; < 0.44 per flight-hour, rule of three).
+
+| sigma | theta | v0 1 m/s: t_rng / harm (p5-p95) | 3 m/s: t_rng / harm | 10 m/s: t_rng / harm | 30 m/s: t_rng / harm |
+|---|---|---|---|---|---|
+| 0 | 1.8 | 8.5 s / 5.5 m (4.5-6.1) | 7.1 / 3.8 | 7.1 / 34.0 | 8.7 / 49.0 |
+| 0.5 | 3.8 | 10.2 / 7.0 (5.7-8.8) | 12.3 / 24.1 (3.9-24.8) | 7.1 / 34.0 | 8.7 / 49.0 |
+| 1.5 | 9.1 | 22.7 / 16.9 (15.2-21.9) | 16.3 / 28.6 | 16.0 / 46.1 | 8.7 / 49.0 |
+| 3 | 18.2 | 40.4 / 26.3 (23.8-30.7) | 19.0 / 31.8 | 18.0 / 47.4 | 9.5 / 49.3 |
+
+Harm at 10 and 30 m/s, and at 3 m/s once the alarm follows the EKF
+jump (~13 s), is the estimate error after the jump (B0 definition), not
+the physical displacement at that moment (as stated for L10/L30 in
+"Predictions").
+
+Misattributions: **0 by the peers' monitors** in every cell. The
+victim's own monitor, before its self flag, names an honest peer in
+many replays once sigma > 0 (L1, b 0.2: 89 alarms in 250 replays at
+sigma 0.5, 264 at 1.5, 257 at 3; L3 / L10 / L30: 4-86). theta_ok grows
+with theta, so "fine" with one peer is easy while the other pair is bad:
+the stated [2c] limit, much larger under noise.
+
+**Map predictions (A1.9):**
+- M1 (harm flat in v0 <= 3): **NOT MET.** Ratio harm(L3) / harm(L1) =
+  0.69 at sigma 0 (expected, stated in A1), 3.45 at 0.5, 1.64-1.76 at
+  1.5, 1.20-1.21 at 3 (within [0.8, 1.25] only at sigma 3). At sigma
+  >= 0.5 the L3 ratio is confounded by alarms after the jump (above).
+- M2 (harm grows with theta(sigma)): **HOLDS** for L1 and L3 at every b
+  (L1: 5.5 / 7.0 / 16.9 / 26.3 m).
+- M3 (fast spoofs: alarm tied to t_jump): **NOT MET.** No alarm before
+  t_jump - 0.5 s in any cell (the P-B1-2 part holds everywhere), but
+  t_rng - t_jump <= 4 s in only 40 % (L10, sigma 1.5), 4 % (L10,
+  sigma 3) and 88 % (L30, sigma 3) of replays.
+
+POST-HOC (exploratory, after the map; not in any decision):
+`scripts/h3_posthoc_m3_residual.py` (1 test), noise-free peer-path
+residual rho_p(t) = |b_0 - b_p| - |x_0 - x_p|. After the jump the victim's
+controller brings its estimate back to the route, so its true position
+leaves it: rho jumps to +16...+31 m, falls through 0 at ~13-15 s and
+settles at about -48 m, while |belief - truth| stays at 31-48 m. The
+residual is blind where the two distances to a peer are equal, whatever
+|e| is. With theta <= 3.8 m both peers reach 3 consecutive ticks in the
+positive phase (7-10 s); with theta = 9.1 m the gap below theta between
+the phases grows from < 1.5 s to 7-8 s, only one peer per L10 flight
+still reaches 3 ticks there (peak ~20 m, marginal), and with GNSS noise
+that path often breaks: the alarm moves to the negative phase (16-18 s).
+This explains M3; it is a property of a range-difference test, not a
+code defect.
+
+For the text (Ch. 4/5): v1 never fires at 1 m/s; ranging always does
+within 120 s with 0 false alarms, but the harm it allows scales with
+the GNSS quality under this calibration rule (~7 m at sigma 0.5 m,
+17-26 m at 1.5-3 m). Attribution relies on the peer path; the victim's
+own judgements of its peers are not usable under GNSS noise.
