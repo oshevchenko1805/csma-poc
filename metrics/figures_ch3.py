@@ -8,6 +8,9 @@ Fig. 3.1  Data-dependency graph under a position-only GNSS spoof of one
           two nodes are not plain transitive closure (the innovation carries
           the taint only while EKF2 rejects the spoof; the EKF velocity is
           clean only under the adversary model).
+Fig. 3.3  Testbed deployment for one UAV i (п. 3.6.2, table 3.16):
+          processes, ports, the command guard, the mesh node, and the
+          ground-truth recorder outside the system under test.
 Fig. 3.2  Placement of monitors and failure domains in architectures A,
           B and C (п. 3.3.3), with the properties O1–O3 of the operational
           CSMA definition (п. 3.2.1) under each panel.
@@ -339,6 +342,138 @@ def fig_architectures(outdir: str) -> None:
     _save(fig, outdir, "fig3_2_architectures")
 
 
+
+# ------------------------------------------------------------------ Fig. 3.3
+
+# process boxes of one lane: id -> (label, x, y, w, h, kind)
+DEPLOY = {
+    "gz": ("Gazebo (gz-sim 8)\nфізика, датчики, істинне положення", 0.20, 3.05, 2.90, 0.52, "env"),
+    "rec": ("Запис істинної\nтраєкторії", 5.10, 3.05, 1.30, 0.52, "obs"),
+    "px4": ("PX4 SITL (x500)\nsysid = i + 1", 0.20, 1.78, 1.35, 0.52, "sut"),
+    "router": ("mavlink-router", 2.00, 1.78, 1.25, 0.52, "sut"),
+    "mon": ("Монітор\n(pymavlink)", 3.75, 2.05, 1.25, 0.52, "sec"),
+    "mavsdk": ("Контролер місії\n(MAVSDK)", 3.75, 1.25, 1.25, 0.52, "sut"),
+    "peers": ("Монітори інших\nапаратів", 5.25, 2.05, 1.15, 0.52, "sec"),
+    "guard": ("Фільтр команд", 2.00, 0.98, 1.25, 0.44, "sec"),
+    "atk": ("Атака: підміна\nкоманди", 5.25, 0.02, 1.15, 0.46, "atk"),
+}
+
+# (src, dst, label, two_way, dashed)
+DEPLOY_EDGES = [
+    ("gz", "px4", "датчики", True, False),
+    ("gz", "rec", "положення ~5 Гц", False, False),
+    ("px4", "router", "UDP\n14540+i", False, False),
+    ("router", "mon", "14570+i", False, False),
+    ("router", "mavsdk", "14560+i", True, False),
+    ("mon", "peers", "TCP 5550+i\n(лише C)", True, False),
+    ("atk", "guard", "14590+i", False, False),
+    ("guard", "px4", "14580+i", False, False),
+    ("atk", "mon", "копія", False, True),
+]
+
+
+def _dbox(ax, key):
+    label, x, y, w, h, kind = DEPLOY[key]
+    fc, ec, lw, ls, rounded = {
+        "env": ("#f3f2ee", LINE, 0.8, "-", False),
+        "obs": ("white", INK, 1.1, "-", False),
+        "sut": ("white", LINE, 0.8, "-", False),
+        "sec": (DET_FILL, DET_EDGE, 1.0, "-", True),
+        "atk": (TAINT_FILL, TAINT, 1.2, "-", False),
+    }[kind]
+    ax.add_patch(FancyBboxPatch((x, y), w, h,
+                                boxstyle="round,pad=0,rounding_size=0.06" if rounded
+                                else "square,pad=0",
+                                facecolor=fc, edgecolor=ec, linewidth=lw, linestyle=ls,
+                                zorder=3))
+    ax.text(x + w / 2, y + h / 2, label, ha="center", va="center", fontsize=8,
+            color=INK, zorder=4, linespacing=1.1)
+
+
+def _dpoint(key, side):
+    _l, x, y, w, h, _k = DEPLOY[key]
+    return {"left": (x, y + h / 2), "right": (x + w, y + h / 2),
+            "top": (x + w / 2, y + h), "bottom": (x + w / 2, y)}[side]
+
+
+def fig_deployment(outdir: str) -> None:
+    y0, y1 = -0.04, 3.85
+    fig = plt.figure(figsize=(WIDTH_IN + 0.05, y1 - y0))
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(-0.02, WIDTH_IN + 0.03)
+    ax.set_ylim(y0, y1)
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    # system under test
+    ax.add_patch(Rectangle((0.05, 0.62), 6.40, 2.20, fill=False, ec=INK_2, lw=0.8,
+                           ls=(0, (4, 2)), zorder=1))
+    ax.text(0.12, 0.68, "Система, що досліджується: процеси апарата i\n"
+            "(три екземпляри, i = 0, 1, 2)", fontsize=7.5, color=INK_2, va="bottom",
+            linespacing=1.05)
+    ax.text(0.20, 3.78, "Середовище симуляції і незалежний спостерігач (поза системою)",
+            fontsize=7.5, color=INK_2, va="top")
+
+    for k in DEPLOY:
+        _dbox(ax, k)
+
+    sides = {
+        ("gz", "px4"): ("bottom", "top"), ("gz", "rec"): ("right", "left"),
+        ("px4", "router"): ("right", "left"), ("router", "mon"): ("right", "left"),
+        ("router", "mavsdk"): ("right", "left"), ("mon", "peers"): ("right", "left"),
+        ("atk", "guard"): ("left", "bottom"), ("guard", "px4"): ("left", "bottom"),
+        ("atk", "mon"): ("top", "bottom"),
+    }
+    for s, d, label, two_way, dashed in DEPLOY_EDGES:
+        a = _dpoint(s, sides[(s, d)][0])
+        b = _dpoint(d, sides[(s, d)][1])
+        if (s, d) == ("gz", "px4"):
+            a = (DEPLOY["px4"][1] + DEPLOY["px4"][3] / 2, DEPLOY["gz"][2])
+        if (s, d) == ("atk", "mon"):
+            a = (a[0] - 0.20, a[1])
+            b = (DEPLOY["mon"][1] + DEPLOY["mon"][3], DEPLOY["mon"][2] + 0.08)
+        if (s, d) == ("guard", "px4"):
+            a = _dpoint("guard", "left")
+            b = (DEPLOY["px4"][1] + 0.40, DEPLOY["px4"][2])
+        color = TAINT if s == "atk" else (DET_EDGE if (s, d) == ("mon", "peers") else LINE)
+        conn = ("angle,angleA=180,angleB=90,rad=0"
+                if (s, d) in (("guard", "px4"), ("atk", "guard")) else "arc3")
+        ax.add_patch(FancyArrowPatch(a, b, arrowstyle="<|-|>" if two_way else "-|>",
+                                     mutation_scale=7, color=color, lw=1.0,
+                                     linestyle=(0, (3, 2)) if dashed else "-",
+                                     connectionstyle=conn, shrinkA=1, shrinkB=1, zorder=2))
+        mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+        off = {("gz", "px4"): (0.06, 0.0, "left"), ("gz", "rec"): (0.0, 0.07, "center"),
+               ("px4", "router"): (0.0, 0.06, "center"),
+               ("router", "mon"): (0.0, 0.18, "center"),
+               ("router", "mavsdk"): (-0.08, -0.22, "right"),
+               ("mon", "peers"): (0.0, 0.30, "center"),
+               ("atk", "guard"): (0.0, 0.07, "center"),
+               ("guard", "px4"): (0.06, 0.20, "left"),
+               ("atk", "mon"): (0.06, 0.0, "left")}[(s, d)]
+        if (s, d) == ("guard", "px4"):
+            mx, my = b[0], a[1]
+        if (s, d) == ("atk", "guard"):
+            mx, my = (a[0] + b[0]) / 2 + 0.3, a[1]
+        if (s, d) == ("router", "mavsdk"):
+            ax.text(b[0] - 0.14, b[1] - 0.04, label, fontsize=7.5, color=INK_2,
+                    ha="right", va="bottom")
+            continue
+        ax.text(mx + off[0], my + off[1], label, fontsize=7.5, color=color if color != LINE else INK_2,
+                ha=off[2], va="bottom" if off[1] > 0 else ("top" if off[1] < 0 else "center"),
+                linespacing=1.05)
+
+    # notes under the security-plane boxes
+    notes = {"mon": "детектори, ізоляція;\nу C — координатор",
+             "mavsdk": "місія; дії відновлення (C);\nпараметри атаки на GNSS"}
+    for k, n in notes.items():
+        _l, x, y, w, h, _k = DEPLOY[k]
+        ax.text(x + w / 2, y - 0.04, n, fontsize=7.5, color=INK_2, ha="center",
+                va="top", style="italic", linespacing=1.05)
+
+    _save(fig, outdir, "fig3_3_deployment")
+
+
 def _save(fig, outdir: str, name: str) -> None:
     os.makedirs(outdir, exist_ok=True)
     for ext in ("png", "pdf"):
@@ -354,6 +489,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     fig_data_dependency(args.outdir)
     fig_architectures(args.outdir)
+    fig_deployment(args.outdir)
     return 0
 
 
