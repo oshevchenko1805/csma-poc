@@ -2652,3 +2652,45 @@ Decisions on text work:
 
 Stage 5 closed. No new flights planned.
 Next (new chat): stage 6 — plan of chapter 3.
+
+## REVIEW STAGE 6 — chapter 3 rewritten whole (2026-09-28)
+
+Plan approved (keep implementation in 3.6 after the methodology; graph in
+3.2; start with 3.6; condense by meaning). Text in
+thesis_text/CH3_V2_TEXT.md (~15.4k words; tables 3.1-3.20, figs 3.1-3.5,
+listing 3.1, formulas 3.1-3.6):
+  3.1 model: assets, adversary classes, MAVLink 2 signing (P7), scenarios,
+      attack trees; ~13.4k -> ~1.9k words (P12)
+  3.2 operational CSMA definition O1-O3, goals, loop, trust boundaries,
+      data-dependency graph (fig 3.1), model vs testbed
+  3.3 baselines A/B, configurations (fig 3.2), response in A/B (P8)
+  3.4 security properties -> metrics
+  3.5 experiments, environment, scenarios, metrics contract, H2/H3 and
+      pre-registration, limits ("swarm" = target architecture only; P11)
+  3.6 implementation (P10): software, deployment (fig 3.3), detectors with
+      ranging, mesh, isolation/coordinator/actions (fig 3.4), attacks,
+      data pipeline (fig 3.5), verification
+  3.7 conclusions
+Boundaries held in the text: ranging-based checks are known (Mykytyn 2023,
+Bi 2024) — contribution = failure domains, data dependency, measured
+limits; rangefinder always "simulated"; graph built after the main
+campaign and H2 but before H3; sysid whitelist does not protect against a
+forged allowed sysid (signing off on the testbed, scenario = foreign sysid).
+
+Commits: text e65553e, dcace2b, 467d6f5, e73ed9e, a6062c3, aeeb79b,
+dbb8b1f, aaffd8c; Ch4 aligned ecab712 (factual fix 4.2.2: monitor takeout
+stops neighbour uav_1's monitors, spoof on uav_0); proofreading + final
+numbering 2e4fff3, 4c7a428; figures 50ca885, 52636ac, 504d7a2, 4c21efa,
+7c70852 (metrics/figures_ch3.py + 13 tests, deterministic PDFs).
+Correction in 7c70852: navigation-integrity metrics DO use the
+monitor-recorded position estimate (undefined under monitor takeout);
+other estimator series are diagnostics only (3.5.4, 3.6.7).
+Tests 1282 -> 1295.
+
+Review doc: P7, P8, P10, P11, P12 closed; P13, P14 notes; stage 6 row,
+section "Этап 6", journal.
+
+Open: Ch3 -> docx once (versioned copy first); literature in a separate
+chat (P3, P9 + refs flagged in the CH3 header); P13 glossary ("UAV" in
+Ch4 vs "апарат/БПЛА" in Ch3); P15 MTTD floor (Ch5); chapter 2.
+Next (new chat): Ch3 docx transfer or literature.
