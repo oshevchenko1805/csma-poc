@@ -116,6 +116,39 @@
 
 **Итог партии 5:** 10 из 10 существуют и рецензированы. Исправления: журнал у L№15 (и L№25), площадка и фамилия у L№14, названия у L№12, 13, 18, 19.
 
+### A, партия 6 (L№21–30) — проверено 28.09 по Crossref
+
+| L№ | Проверка | Полные выходные данные (сверено) | Что изменилось относительно списка |
+|---|---|---|---|
+| 21 | **испр** | Furrer F. J. Safe and secure system architectures for cyber-physical systems. *Informatik Spektrum*. 2023. Vol. 46, No. 2. P. 96–103. DOI: 10.1007/s00287-023-01533-z | Один автор (не «et al.»); том, страницы, DOI; в тексте не цитируется |
+| 22 | **испр — журнал и название** | Singh P., Azari M. S., Vitale F., Flammini F., Mazzocca N., Caporuscio M., Thornadtsson J. Using log analytics and process mining to enable self-healing in the Internet of Things. *Environment Systems and Decisions*. 2022. Vol. 42, No. 2. P. 234–250. DOI: 10.1007/s10669-022-09859-x | **Журнал — Environment Systems and Decisions, не Empirical Software Engineering**; полное название; в тексте не цитируется |
+| 23 | **ок** | = B№7: Bashendy M., Tantawy A., Erradi A. … *Computers & Security*. 2023. Vol. 124. Art. 102984 | объединить с B№7 |
+| 24 | **испр — ДРУГОЙ АВТОР** | Flammini F. Digital twins as run-time predictive models for the resilience of cyber-physical systems: a conceptual framework. *Philosophical Transactions of the Royal Society A*. 2021. Vol. 379, No. 2207. Art. 20200369. DOI: 10.1098/rsta.2020.0369 | **Автор статьи по этому DOI — Francesco Flammini (один), а не Eckhart & Ekelhart.** Название с подзаголовком. В CH3 и разделе 2 «[Eckhart & Ekelhart, 2021]» → «[Flammini, 2021]» (шаг 1.4) |
+| 25 | **испр — журнал** | Ramos-Cruz B., Andreu-Perez J., Martínez L. The cybersecurity mesh: A comprehensive survey of involved artificial intelligence methods, cryptographic protocols and challenges for future research. *Neurocomputing*. 2024. Vol. 581. Art. 127427. DOI: 10.1016/j.neucom.2024.127427 | **Журнал — Neurocomputing, не Applied Soft Computing**; авторы |
+| 26 | **удалить** | дубль L№25 | — |
+| 27 | **испр** | Abdulrazak B., Codjo J. A., Paul S. Self-healing Approach for IoT Architecture: AMI Platform. *Participative Urban Health and Healthy Aging in the Age of AI* (Lecture Notes in Computer Science). Cham : Springer, 2022. P. 3–17. DOI: 10.1007/978-3-031-09593-1_1 | Тип — глава в LNCS (сборник конференции); авторы, страницы; в тексте не цитируется. Том LNCS — уточнить при оформлении |
+| 28 | **испр — журнал и название** | Patil D. A., G. S. A comprehensive survey on securing the social internet of things: protocols, threat mitigation, technological integrations, tools, and performance metrics. *Scientific Reports*. 2025. Vol. 15. Art. 40190. DOI: 10.1038/s41598-025-23865-4 | Журнал — Scientific Reports (был «PMC indexed journal»); двое авторов; полное название. Второй автор в Crossref — «Shyamala G.» (запись имени уточнить по статье) |
+| 29 | **испр** | Mohammed A. B., Chaari Fourati L. Investigation on datasets toward intelligent intrusion detection systems for Intra and inter-UAVs communication systems. *Computers & Security*. 2025. Vol. 150. Art. 104215. DOI: 10.1016/j.cose.2024.104215 | Двое авторов; том, номер, DOI |
+| 30 | **испр** | Hutchins C., Aniello L., Gerding E., Halak B. A flying ad-hoc network dataset for early time series classification of grey hole attacks. *Scientific Data*. 2025. Vol. 12. Art. 1431. DOI: 10.1038/s41597-025-05560-1 | Номер статьи, авторы |
+
+**Итог партии 6:** 9 уникальных из 10 существуют (L№26 — дубль). Серьёзные ошибки списка: **L№24 — неверные авторы** (Flammini, а не Eckhart & Ekelhart); **L№22 — неверный журнал**.
+
+---
+
+## Итог шага 1.2 (28.09)
+
+| Группа | Проверено | Существуют | Рецензированы | Препринты / веб | Не подтверждено |
+|---|---|---|---|---|---|
+| A. Список L | 30 → 29 уникальных (L№23 = B№7) | 29 | 27 | 1 препринт (L№5), L№27 — глава LNCS | — |
+| B. Разделы 3–4 | 13 | 13 | 9 | 1 препринт (Park & Yoo), 3 веб-ресурса (Gartner, MAVLink, ATT&CK) | том/стр. Schneier (цитируем по странице автора) |
+| C. LIT_CHECK | 21 | 21 | 17 | 2 препринта (C№19; v1 C№15), 2 страницы Qorvo | номер статьи C№10 |
+| **Всего уникальных** | **≈ 61** | **все** | | | |
+
+**Серьёзные ошибки в исходном списке (8):** неверные авторы — L№24; неверный журнал — L№15, L№22, L№25; несовпадение названия и года по DOI — L№2; неверная площадка — L№14; нет авторов — L№3, L№23. Ни одного несуществующего источника не найдено.
+
+**Решения для плана раздела 2 (не сейчас):** L№5 (препринт, не цитируется) — удалить?; некоторые пункты L не цитируются (L№3, 6, 10, 17, 21, 22, 27) — процитировать там, где они подкрепляют вывод, или удалить; C№7 — воркшоп или CDC 2010; C№15 — v1 или RA-L 2025.
+
+
 
 
 ---
@@ -241,4 +274,4 @@ Flueratoru 2020 GLOBECOM (Q6) — конференционная версия B�
 | 3 | C№13–21 — **готово 28.09** | архитектуры, кооперативная локализация, UWB |
 | 4 | L№1–10 — **готово 28.09** | |
 | 5 | L№11–20 — **готово 28.09** | |
-| 6 | L№21–30 | |
+| 6 | L№21–30 — **готово 28.09** | |
