@@ -19,6 +19,15 @@
 
 Старые ссылки прежнего раздела 3 (Shostack, Bekmezci и др.) не входят: раздел 3 переписан, в CH3_V2 их нет.
 
+## Решения автора (28.09)
+
+- ATT&CK for ICS: переходим на версию v19 (коды T1692.002, T1691.002, T1691.001 вместо T0856, T0804, T0803), в ссылке указываем версию. Правка таблицы 3.1 и примечания — шаг 1.4.
+- Gartner: цитируем открытый пресс-релиз от 18.10.2021 (B№1).
+- Schneier 1999: цитируем по странице автора с датой обращения (B№6).
+- Формат ссылок в тексте: пока [Автор, рік]; окончательный — по требованиям учреждения, один раз при переносе в docx.
+- 2.2: «аналітичний огляд» с кратким описанием поиска; без цели по числу источников.
+
+
 ## Итог инвентаризации
 
 | Группа | Сколько | Замечание |
@@ -89,7 +98,7 @@
 | 8 | [Cardenas et al., 2011] | C3 3.1 | **ок / соответствие слабое** | АН | Cárdenas A. A., Amin S., Lin Z.-S., Huang Y.-L., Huang C.-Y., Sastry S. Attacks against process control systems: risk assessment, detection, and response. *ASIACCS '11: Proc. 6th ACM Symp. on Information, Computer and Communications Security*. 2011. P. 355–366. DOI: 10.1145/1966913.1966959 | **частично**: статья об обнаружении атак по физической модели процесса, а в тексте — «межі, на яких змінюються припущення про довіру, контроль і фізичну доступність» | Шаг 1.4: оставить только Humayed или заменить Cárdenas на более подходящую его работу |
 | 9 | [Humayed et al., 2017] | C3 3.1 | **ок** | МД | Humayed A., Lin J., Li F., Luo B. Cyber-Physical Systems Security—A Survey. *IEEE Internet of Things Journal*. 2017. Vol. 4, No. 6. P. 1802–1831. DOI: 10.1109/JIOT.2017.2703172 | да (обзор безопасности CPS по кибер- и физическим аспектам) | |
 | 10 | [Kerns et al., 2014] | C4 4.x (2 раза) | **ок** | ПТ (сайт лаборатории) | Kerns A. J., Shepard D. P., Bhatti J. A., Humphreys T. E. Unmanned Aircraft Capture and Control Via GPS Spoofing. *Journal of Field Robotics*. 2014. Vol. 31, No. 4. P. 617–636. DOI: 10.1002/rob.21513 | да: вертолёт в режиме удержания точки («maintain hover at a specified waypoint») захвачен и уведён подменой GPS | |
-| 11 | [Mykytyn et al., 2023] | C3 3.6.3, C4 4.6 | **ок / стр. ?** | ПТ (arXiv) | Mykytyn P., Brzozowski M., Dyka Z., Langendoerfer P. GPS-Spoofing Attack Detection Mechanism for UAV Swarms. *2023 12th Mediterranean Conference on Embedded Computing (MECO)*. Budva, 2023. DOI: 10.1109/MECO58584.2023.10154998 | да: сравнение GPS-расстояний с дальностями IR-UWB, порог | **Страницы не подтверждены** (IEEE Xplore не открылся). Ближайшая работа №3 |
+| 11 | [Mykytyn et al., 2023] | C3 3.6.3, C4 4.6 | **ок** | ПТ (arXiv) | Mykytyn P., Brzozowski M., Dyka Z., Langendoerfer P. GPS-Spoofing Attack Detection Mechanism for UAV Swarms. *2023 12th Mediterranean Conference on Embedded Computing (MECO)*. Budva, 2023. P. 1–8. DOI: 10.1109/MECO58584.2023.10154998 | да: сравнение GPS-расстояний с дальностями IR-UWB, порог | Страницы подтверждены Crossref (партия 2). Ближайшая работа №3 |
 | 12 | [Bi et al., 2024] | C3 3.6.3, C4 4.6 | **ок** | ПТ (arXiv) | Bi S., Li K., Hu S., Ni W., Wang C., Wang X. Detection and Mitigation of Position Spoofing Attacks on Cooperative UAV Swarm Formations. *IEEE Transactions on Information Forensics and Security*. 2024. Vol. 19. P. 1883–1895. DOI: 10.1109/TIFS.2023.3341398 | да | Страницы — по странице публикаций соавтора (UNSW) и ссылке в OUCI |
 | 13 | [Park & Yoo, 2026] | C3 3.5, 3.6.3; C4 4.6 | **ок (препринт)** | ПТ (arXiv HTML v1) | Park M., Yoo J. S. Rigid-Covert GNSS Spoofing of UAV Swarms: A Structural Blind Spot, Its Detection Limit, and Absolute-Anchor Defenses : preprint. arXiv:2608.06885. 2026. URL: https://arxiv.org/abs/2608.06885 | да: общий медленный сдвиг сохраняет попарные расстояния и «unobservable to any relative-only detector» | Не рецензирован; журнальной версии не найдено (28.09). Проверить перед защитой. Ближайшая работа №1. Авторы — Jeonbuk National University |
 
@@ -129,6 +138,26 @@
 
 Flueratoru 2020 GLOBECOM (Q6) — конференционная версия B№3; в список не включаем.
 
+### C, партия 2 (C№1–12) — проверено 28.09 по Crossref (через встроенный браузер) и страницам авторов
+
+| C№ | Проверка | Полные выходные данные (сверено) | Примечание |
+|---|---|---|---|
+| 1 | **ок** | Michieletto G., Formaggio F., Cenedese A., Tomasin S. Robust Localization for Secure Navigation of UAV Formations Under GNSS Spoofing Attack. *IEEE Transactions on Automation Science and Engineering*. 2023. Vol. 20, No. 4. P. 2383–2396. DOI: 10.1109/TASE.2022.3208662 | |
+| 2 | **ок** | Meng L., Zhang L., Yang L., Yang W. A GPS-Adaptive Spoofing Detection Method for the Small UAV Cluster. *Drones*. 2023. Vol. 7, No. 7. Art. 461. DOI: 10.3390/drones7070461 | |
+| 3 | **испр** | Dev K., Madhwal Y., Shevelo S., Osinenko P., Yanovich Y. SwarmRaft: Leveraging Consensus for Robust Drone Swarm Coordination in GNSS-Degraded Environments. *IEEE Internet of Things Journal*. 2026. Vol. 13, No. 5. P. 9112–9120. DOI: 10.1109/JIOT.2025.3645453 | Год 2026 (в LIT_CHECK — 2025, по DOI); добавлены название и авторы |
+| 4 | **ок** | Jung J. H., Hong M. Y., Choi H., Yoon J. W. An Analysis of GPS Spoofing Attack and Efficient Approach to Spoofing Detection in PX4. *IEEE Access*. 2024. Vol. 12. P. 46668–46677. DOI: 10.1109/ACCESS.2024.3382543 | Ближайшая по обходу EKF2 |
+| 5 | **ок** | Finn A., Jia M., Li Y., Yuan J. Detecting Stealthy GPS Spoofing Attack Against UAVs Using Onboard Sensors. *IEEE INFOCOM 2024 — IEEE Conference on Computer Communications Workshops (INFOCOM WKSHPS)*. Vancouver, 2024. P. 1–6. DOI: 10.1109/INFOCOMWKSHPS61880.2024.10620818 | |
+| 6 | **испр** | Khazraei A., Meng H., Pajic M. Black-box Stealthy GPS Attacks on Unmanned Aerial Vehicles. *2024 IEEE 63rd Conference on Decision and Control (CDC)*. 2024. P. 2857–2862. DOI: 10.1109/CDC56724.2024.10885819 | Добавлены DOI и страницы (было только arXiv) |
+| 7 | **ок (без DOI)** | Mo Y., Sinopoli B. False data injection attacks in control systems. *Proc. 1st Workshop on Secure Control Systems (SCS), CPS Week 2010*. Stockholm, 2010. URL: https://yilinmo.github.io/papers/scs2010.html | Сборник без DOI и страниц. Аннотация подтверждает: условие дестабилизации системы с фильтром Калмана при обходе детектора отказов. Рецензируемая альтернатива с DOI: Mo Y., Garone E., Casavola A., Sinopoli B. False data injection attacks against state estimation in wireless sensor networks. *49th IEEE CDC*. 2010. P. 5967–5972. DOI: 10.1109/CDC.2010.5718158 — выбрать при плане раздела 2 |
+| 8 | **испр** | Psiaki M. L., Humphreys T. E. GNSS Spoofing and Detection. *Proceedings of the IEEE*. 2016. Vol. 104, No. 6. P. 1258–1270. DOI: 10.1109/JPROC.2016.2526658 | Добавлен DOI |
+| 9 | **испр** | Dash P., Li G., Chen Z., Karimibiuki M., Pattabiraman K. PID-Piper: Recovering Robotic Vehicles from Physical Attacks. *2021 51st Annual IEEE/IFIP International Conference on Dependable Systems and Networks (DSN)*. Taipei, 2021. P. 26–38. DOI: 10.1109/DSN48987.2021.00020 | Добавлены название и авторы |
+| 10 | **испр** | Zhang L., Lu P., Kong F., Chen X., Sokolsky O., Lee I. Real-time Attack-recovery for Cyber-physical Systems Using Linear-quadratic Regulator. *ACM Transactions on Embedded Computing Systems*. 2021. Vol. 20, No. 5s. Art. 79 (24 p.). DOI: 10.1145/3477010 | Авторы добавлены; номер статьи 79 — по LIT_CHECK, Crossref даёт только «1–24» |
+| 11 | **испр** | Kong F., Xu M., Weimer J., Sokolsky O., Lee I. Cyber-Physical System Checkpointing and Recovery. *2018 ACM/IEEE 9th International Conference on Cyber-Physical Systems (ICCPS)*. Porto, 2018. P. 22–31. DOI: 10.1109/ICCPS.2018.00011 | Добавлены название и авторы |
+| 12 | **ок** | Tariq U., Shaukat K. Mission-aware BeiDou spoofing defense in UAV swarms with LLM-assisted context validation. *Frontiers in Communications and Networks*. 2026. Vol. 7. Art. 1760543. DOI: 10.3389/frcmn.2026.1760543 | |
+
+Попутно Crossref подтвердил страницы **B№11 Mykytyn 2023: P. 1–8** (Budva, Montenegro) и данные **B№12 Bi 2024**.
+
+
 ---
 
 ## D. Утверждения в тексте, которые надо подтвердить источником (не библиография)
@@ -153,7 +182,7 @@ Flueratoru 2020 GLOBECOM (Q6) — конференционная версия B�
 | Партия | Что | Почему первой |
 |---|---|---|
 | 1 | B№1–13 — **готово 28.09** | закрывают [уточнити] в разделе 3 до переноса в docx; три ближайшие работы |
-| 2 | C№1–12 | спуфинг, обход EKF, восстановление — ядро новизны |
+| 2 | C№1–12 — **готово 28.09** | спуфинг, обход EKF, восстановление — ядро новизны |
 | 3 | C№13–21 | архитектуры, кооперативная локализация, UWB |
 | 4 | L№1–10 | |
 | 5 | L№11–20 | |
