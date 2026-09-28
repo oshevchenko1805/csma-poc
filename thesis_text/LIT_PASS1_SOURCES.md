@@ -60,7 +60,7 @@
 | 20 | Johnphill O. et al. (2023). Self-Healing in CPS Using Machine Learning… Future Internet 15(7):244 | 2.1, 2.6, 2.9 | C3 | mdpi.com/1999-5903/15/7/244 | «et al.», нет DOI | | | |
 | 21 | Furrer F.J. et al. (2023). Safe and secure system architectures for CPS. Informatik Spektrum | — | — | — | не цитируется; нет тома | | | |
 | 22 | Singh P. et al. (2022). Using log analytics and process mining to enable self-healing… Empirical Software Engineering | — | — | — | название обрезано; не цитируется | | | |
-| 23 | (2022). Intrusion response systems for cyber-physical systems. Computers & Security | — | C3 (как Bashendy 2023) | — | **нет авторов**; год 2022 или 2023 (том 124 — январь 2023) | | | |
+| 23 | (2022). Intrusion response systems for cyber-physical systems. Computers & Security | — | C3 (как Bashendy 2023) | — | **нет авторов**; год 2022 или 2023 (том 124 — январь 2023) | **ок** | АН | **= B№7 Bashendy, Tantawy, Erradi 2023** — объединить |
 | 24 | Eckhart M., Ekelhart A. (2021). Digital twins as run-time predictive models… Phil. Trans. R. Soc. A 379(2207):20200369 | 2.6, 2.9 | C3 | royalsocietypublishing.org/doi/10.1098/rsta.2020.0369 | выглядит полным; сверить авторов | | | |
 | 25 | Ramos-Cruz B. et al. (2024). The cybersecurity mesh: A comprehensive survey… Applied Soft Computing | 2.7, 2.9 | C3 | sciencedirect.com/…/S092523122400198X | **подозрение: PII с ISSN 0925-2312 = Neurocomputing, а не Applied Soft Computing** | | | |
 | 26 | (2024). The cybersecurity mesh: … (ScienceDirect) | — | — | — | **дубль №25 — удалить** | | | |
@@ -73,25 +73,29 @@
 
 ---
 
-## B. Цитируется в новых разделах 3–4, нет в списке L (13)
+## B. Цитируется в новых разделах 3–4, нет в списке L (13) — партия 1 проверена 28.09
 
-Приоритет: эти ссылки закрываются до переноса раздела 3 в docx.
+Приоритет: эти ссылки закрываются до переноса раздела 3 в docx. «Соответствие» — подтверждает ли источник утверждение, к которому он стоит (подробно — шаг 1.4).
 
-| B№ | Ссылка в тексте | Где | Что утверждается в тексте (кратко) | Известно из LIT_CHECK / проблема | Проверка | Открыто | Примечание 1.2 |
+| B№ | Ссылка в тексте | Где | Проверка | Открыто | Полные выходные данные (сверено) | Соответствие утверждению | Примечание |
 |---|---|---|---|---|---|---|---|
-| 1 | [Gartner, 2021] | C3 3.2 (с [уточнити]) | первичный источник понятия CSMA | нужен конкретный документ Gartner (отчёт / Top Strategic Technology Trends); доступ платный — возможно, цитировать открытую страницу Gartner | | | |
-| 2 | [Dash et al., 2024] | C3 3.2, 3.x (один раз с [уточнити]) | выбор действия восстановления по скомпрометированным датчикам для одного аппарата (DeLorean) | Q3: ACM AsiaCCS'24, pp. 915–929, DOI 10.1145/3634737.3644997, ПТ; **одна из трёх ближайших работ** | | | |
-| 3 | [Flueratoru et al., 2022] | C3 3.6.3 (с [уточнити]) | σ дальномера, смещение за препятствиями | **расхождение:** в CH3 — IEEE IoT J. 2022; в LIT_CHECK проверена Flueratoru 2020, GLOBECOM (DOI 10.1109/GLOBECOM42002.2020.9347984). Выяснить, какая работа содержит использованные числа | | | |
-| 4 | [MAVLink, Message Signing] | C3 3.1.2 (с [уточнити]) | MAVLink 2 предусматривает необязательную подпись | электронный ресурс (mavlink.io); плюс проверить поддержку в PX4 на коммите стенда | | | |
-| 5 | MITRE ATT&CK for ICS | C3 3.1 (с [уточнити]), табл. техник | рамка моделирования; коды T0856, T0832, T0826, T0814, T0860, T0821, T0804, T0831, T0813, T0803 | электронный ресурс; **сверить каждый код с названием техники** | | | |
-| 6 | [Schneier, 1999] | C3 3.1 (с [уточнити]) | деревья атак | Schneier B. Attack Trees. Dr. Dobb's Journal, 1999 — сверить том/номер | | | |
-| 7 | [Bashendy et al., 2023] | C3 | обзор IRS для CPS | Q3: Computers & Security 124:102984, DOI 10.1016/j.cose.2022.102984; авторы не сверены; вероятно = L№23 | | | |
-| 8 | [Cardenas et al., 2011] | C3 3.1 | CPS: меняются допущения о доверии и доступе | какая работа Cardenas 2011 — сверить | | | |
-| 9 | [Humayed et al., 2017] | C3 3.1 | то же | вероятно, Cyber-Physical Systems Security — A Survey, IEEE IoT J. 2017 — сверить | | | |
-| 10 | [Kerns et al., 2014] | C4 (2 раза) | удержание позиции захватывается спуфингом | Q2: J. Field Robotics 31(4):617–636, DOI 10.1002/rob.21513, АН | | | |
-| 11 | [Mykytyn et al., 2023] (+) | C3, C4 | проверка GPS-дистанций по UWB-дальностям | Q1: MECO-2023, IEEE 10154998, arXiv 2301.12766, ПТ; **ближайшая работа**; экспериментов нет | | | |
-| 12 | [Bi et al., 2024] (+) | C3, C4 | обнаружение как задача допустимости локализации (SDP) | Q1: IEEE TIFS 19, arXiv 2312.03787, ПТ; DOI не сверен | | | |
-| 13 | [Park & Yoo, 2026] (+) | C3, C4 (по 2 раза) | общий медленный сдвиг роя невидим для относительных детекторов | Q1: arXiv 2608.06885, ПТ, **препринт**; **ближайшая работа**; проверить, не вышла ли рецензированная версия | | | |
+| 1 | [Gartner, 2021] | C3 3.2 | **испр** | стр. | Gartner Identifies the Top Strategic Technology Trends for 2022 : press release / Gartner, Inc. 18.10.2021. URL: https://www.gartner.com/en/newsroom/press-releases/2021-10-18-gartner-identifies-the-top-strategic-technology-trends-for-2022 (дата звернення: 28.09.2026) | да: «security perimeter is gone … requires a cybersecurity mesh architecture (CSMA)». Описание «компонуемый, масштабируемый подход; единое управление политиками, аналитика безопасности, identity fabric» — в отчёте Gartner «Top Strategic Technology Trends for 2022: Cybersecurity Mesh» | Платный отчёт: копия без даты и авторов — его выходные данные не подтверждены. Предлагаю цитировать открытый пресс-релиз (год 2021 в тексте сохраняется). Есть и ранний отчёт «Top Strategic Technology Trends for 2021: Cybersecurity Mesh» (Gartner doc 3996593) — метаданные не открылись |
+| 2 | [Dash et al., 2024] | C3 3.2 (2 раза) | **ок** | АН + метаданные arXiv | Dash P., Li G., Karimibiuki M., Pattabiraman K. Diagnosis-guided Attack Recovery for Securing Robotic Vehicles from Sensor Deception Attacks. *ASIA CCS '24: Proc. 19th ACM Asia Conf. on Computer and Communications Security*. 2024. P. 915–929. DOI: 10.1145/3634737.3644997 | да: диагностика атакованных датчиков → восстановление по нескомпрометированным (DeLorean), один аппарат | [уточнити] снять. Ближайшая работа №2 |
+| 3 | [Flueratoru et al., 2022] | C3 3.6.3 | **ок** | ПТ (arXiv 2104.11042) | Flueratoru L., Wehrli S., Magno M., Lohan E. S., Niculescu D. High-Accuracy Ranging and Localization With Ultrawideband Communications for Energy-Constrained Devices. *IEEE Internet of Things Journal*. 2022. Vol. 9, No. 10. P. 7463–7480. DOI: 10.1109/JIOT.2021.3125256 | да: DW1000 в прямой видимости 0.00 ± 0.05 м (→ σ = 0.1 м вдвое консервативнее); за бетонной стеной +0.44 м, за телом человека +0.60 м (→ 0.5 м) | **Расхождение снято**: цитируем именно журнальную статью 2022. GLOBECOM 2020 (C/Q6) — её конференционная версия, в список не нужна. [уточнити] снять |
+| 4 | [MAVLink, Message Signing] | C3 3.1.2 | **ок** | стр. | Message Signing (Authentication) // MAVLink Developer Guide. URL: https://mavlink.io/en/guide/message_signing.html (дата звернення: 28.09.2026) | да, кроме одной фразы: ключ передаётся сообщением SETUP_SIGNING, «only … over a secure link (e.g. USB or wired Ethernet)» — в тексте «ключ розподіляють поза протоколом» | Правка текста → шаг 1.4. Состав подписи (link ID, 48-бит метка, 48-бит подпись = первые 6 байт SHA-256, ключ 32 байта), «только аутентификация, не шифрование», необязательность — подтверждены |
+| 5 | MITRE ATT&CK for ICS | C3 3.1, табл. техник | **испр** | стр. | MITRE ATT&CK for ICS : knowledge base. Version 19 / The MITRE Corporation. URL: https://attack.mitre.org/versions/v19/ (дата звернення: 28.09.2026) — или v18 (см. примечание) | **7 из 10 кодов действуют**: T0832, T0826, T0814, T0860, T0821, T0831, T0813. **3 кода устарели в v19** (28.04.2026): T0856 Spoof Reporting Message → T1692.002 Unauthorized Message: Reporting Message; T0804 Block Reporting Message → T1691.002; T0803 Block Command Message → T1691.001 | Решение автора: (а) перейти на коды v19 и указать версию; (б) оставить старые коды и сослаться на v18 (https://attack.mitre.org/versions/v18/, действовала до 27.04.2026). Рекомендую (а) |
+| 6 | [Schneier, 1999] | C3 3.1 | **испр / ?** | стр. автора | Schneier B. Attack Trees. *Dr. Dobb's Journal*. 1999. December. URL: https://www.schneier.com/academic/archives/1999/12/attack_trees.html | да | Том/номер/страницы (часто цитируют 24(12):21–29) первоисточником **не подтверждены** — цитировать по странице автора с датой обращения. [уточнити] снять после выбора |
+| 7 | [Bashendy et al., 2023] | C3 | **ок** | АН | Bashendy M., Tantawy A., Erradi A. Intrusion response systems for cyber-physical systems: A comprehensive survey. *Computers & Security*. 2023. Vol. 124. Art. 102984. DOI: 10.1016/j.cose.2022.102984 | да (обзор IRS для CPS; «still at its early stages and lacks applicability to real CPS») | **= L№23** (там без авторов и с годом 2022) — объединить |
+| 8 | [Cardenas et al., 2011] | C3 3.1 | **ок / соответствие слабое** | АН | Cárdenas A. A., Amin S., Lin Z.-S., Huang Y.-L., Huang C.-Y., Sastry S. Attacks against process control systems: risk assessment, detection, and response. *ASIACCS '11: Proc. 6th ACM Symp. on Information, Computer and Communications Security*. 2011. P. 355–366. DOI: 10.1145/1966913.1966959 | **частично**: статья об обнаружении атак по физической модели процесса, а в тексте — «межі, на яких змінюються припущення про довіру, контроль і фізичну доступність» | Шаг 1.4: оставить только Humayed или заменить Cárdenas на более подходящую его работу |
+| 9 | [Humayed et al., 2017] | C3 3.1 | **ок** | МД | Humayed A., Lin J., Li F., Luo B. Cyber-Physical Systems Security—A Survey. *IEEE Internet of Things Journal*. 2017. Vol. 4, No. 6. P. 1802–1831. DOI: 10.1109/JIOT.2017.2703172 | да (обзор безопасности CPS по кибер- и физическим аспектам) | |
+| 10 | [Kerns et al., 2014] | C4 4.x (2 раза) | **ок** | ПТ (сайт лаборатории) | Kerns A. J., Shepard D. P., Bhatti J. A., Humphreys T. E. Unmanned Aircraft Capture and Control Via GPS Spoofing. *Journal of Field Robotics*. 2014. Vol. 31, No. 4. P. 617–636. DOI: 10.1002/rob.21513 | да: вертолёт в режиме удержания точки («maintain hover at a specified waypoint») захвачен и уведён подменой GPS | |
+| 11 | [Mykytyn et al., 2023] | C3 3.6.3, C4 4.6 | **ок / стр. ?** | ПТ (arXiv) | Mykytyn P., Brzozowski M., Dyka Z., Langendoerfer P. GPS-Spoofing Attack Detection Mechanism for UAV Swarms. *2023 12th Mediterranean Conference on Embedded Computing (MECO)*. Budva, 2023. DOI: 10.1109/MECO58584.2023.10154998 | да: сравнение GPS-расстояний с дальностями IR-UWB, порог | **Страницы не подтверждены** (IEEE Xplore не открылся). Ближайшая работа №3 |
+| 12 | [Bi et al., 2024] | C3 3.6.3, C4 4.6 | **ок** | ПТ (arXiv) | Bi S., Li K., Hu S., Ni W., Wang C., Wang X. Detection and Mitigation of Position Spoofing Attacks on Cooperative UAV Swarm Formations. *IEEE Transactions on Information Forensics and Security*. 2024. Vol. 19. P. 1883–1895. DOI: 10.1109/TIFS.2023.3341398 | да | Страницы — по странице публикаций соавтора (UNSW) и ссылке в OUCI |
+| 13 | [Park & Yoo, 2026] | C3 3.5, 3.6.3; C4 4.6 | **ок (препринт)** | ПТ (arXiv HTML v1) | Park M., Yoo J. S. Rigid-Covert GNSS Spoofing of UAV Swarms: A Structural Blind Spot, Its Detection Limit, and Absolute-Anchor Defenses : preprint. arXiv:2608.06885. 2026. URL: https://arxiv.org/abs/2608.06885 | да: общий медленный сдвиг сохраняет попарные расстояния и «unobservable to any relative-only detector» | Не рецензирован; журнальной версии не найдено (28.09). Проверить перед защитой. Ближайшая работа №1. Авторы — Jeonbuk National University |
+
+Выходные данные здесь даны полностью, но ещё не по ДСТУ 8302:2015 — оформление в проходе 2.
+
+**Итог партии 1:** 13 из 13 существуют. [уточнити] можно снять у Dash, Flueratoru, MAVLink, Gartner (после выбора варианта). Открытые решения автора: ATT&CK (версия v19 или v18), Gartner (пресс-релиз), Schneier (цитировать по странице автора). Не подтверждено: страницы Mykytyn 2023; том/страницы Schneier 1999. В шаг 1.4 переходят: фраза о ключе MAVLink, соответствие Cárdenas 2011.
 
 ---
 
@@ -123,7 +127,7 @@
 | 20 | Qorvo DWM1000 (страница продукта) | Q6 | стр. | дата обращения; лучше даташит |
 | 21 | Qorvo DW3110 (страница продукта) | Q6 | стр. | дата обращения; лучше даташит |
 
-Flueratoru 2020 GLOBECOM (Q6) — см. B№3.
+Flueratoru 2020 GLOBECOM (Q6) — конференционная версия B№3; в список не включаем.
 
 ---
 
@@ -131,11 +135,11 @@ Flueratoru 2020 GLOBECOM (Q6) — см. B№3.
 
 | D№ | Где | Что проверить |
 |---|---|---|
-| 1 | C3 3.1, таблица техник | каждый код ATT&CK for ICS соответствует названию и смыслу сценария (B№5) |
+| 1 | C3 3.1, таблица техник | коды ATT&CK: проверены (B№5) — 3 устарели в v19, решение автора |
 | 2 | C3 3.1.2 | MAVLink 2 signing поддерживается PX4 на коммите стенда `9fe69d4f33` (документация PX4) |
-| 3 | C3 3.6.3 | числа σ и смещения дальномера взяты из той работы Flueratoru, на которую ссылаемся (B№3) |
+| 3 | C3 3.6.3 | закрыто: числа σ и смещения совпадают с Flueratoru et al. 2022 (B№3) |
 | 4 | C3 3.2 / N | формулировки о DeLorean, Mykytyn, Park & Yoo соответствуют их тексту (шаг 1.4) |
-| 5 | C4 4.6 | Kerns 2014: «удержание позиции захватывается спуфингом» — есть ли это в статье именно так |
+| 5 | C4 | закрыто: Kerns 2014 — захват в режиме удержания точки подтверждён (B№10) |
 
 ## Кандидаты прохода 2 (сейчас не проверяются)
 
@@ -148,7 +152,7 @@ Flueratoru 2020 GLOBECOM (Q6) — см. B№3.
 
 | Партия | Что | Почему первой |
 |---|---|---|
-| 1 | B№1–13 | закрывают [уточнити] в разделе 3 до переноса в docx; три ближайшие работы |
+| 1 | B№1–13 — **готово 28.09** | закрывают [уточнити] в разделе 3 до переноса в docx; три ближайшие работы |
 | 2 | C№1–12 | спуфинг, обход EKF, восстановление — ядро новизны |
 | 3 | C№13–21 | архитектуры, кооперативная локализация, UWB |
 | 4 | L№1–10 | |
