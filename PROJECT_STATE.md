@@ -2480,3 +2480,72 @@ read only setup fields (t_target_set, rate_confirmed, range_source,
 trajectory_stats, counters, window_short_s), no alarm events. Then
 run_batch --preset h3 --log-root runs_h3 (~90 min); during the series
 only `python3 -m metrics.h3_analysis runs_h3` (status).
+
+## REVIEW STAGE 5 (part 6) — step 10 + H3 flights: H3 CONFIRMED (2026-09-27/28)
+
+Before the flights (additive, v1 defaults, no architecture branch):
+d54a2ca  10.1 ranging health counters: RangingConsistencyDetector.stats
+         evaluated / no_own_position / no_range (skip counters
+         independent, cumulative, kept by reset()); Monitor.stats
+         ranging_* keys only when ranging is wired. 15 tests.
+a3a4b9b  prereg Implementation item 10 (before any B1 flight): exactly one
+         technical L30 flight in runs_h3_smoke, setup fields only, PASS
+         criteria (evaluated share >= 0.95 per monitor, handler_errors 0,
+         window_short_s 0, ...); from that flight on, changes go to
+         Amendments.
+dcc9cca  10.3 scripts/h3_smoke_check.py: prints only those fields and
+         PASS/FAIL; never reads alarm events. 23 tests.
+52e3d97  wording fix before any flight (code unchanged): the inject_start
+         marker is logged AFTER fire(), i.e. just after t_target_set
+         (inject_lag_s <= 0); attack_fired_wall is what precedes the OFF_R
+         writes. Prereg items 8/9 marked "corrected before any flight".
+Technical flight (L30, runs_h3_smoke): PASS on every field; 440/0/0
+ranging evaluations per monitor. Its alarms were not read.
+  h3_smoke_raw.tar.gz SHA-256
+  647c6bcaff88b57d3c6f7278123d7c07685b21877275c661eee7b3dd4fc5d65d
+
+Series: run_batch --preset h3 --log-root runs_h3, 20/20 ok, code 52e3d97.
+Status: 20/20 included, 0 excluded, 0 unplanned, 0 config problems.
+  h3_raw.tar.gz SHA-256
+  a1746b37b5867b5e55f284e18d74611a88eb0c38e7dd5e65c2ef31f66d2483aa
+  (VM = Mac; --final re-run on the Mac copy gives the same verdict)
+
+8f8d8a1  Results in H3_PREREGISTRATION.md (every flight, every prediction):
+  H3 CONFIRMED: L1 5/5, Wilson [0.57, 1.00]; 0 false alarms in 3
+    no-attack flights; gps and cross_check silent at L1; 0 alarms before
+    injection. L1 t_rng_peer median 8.43 s (7.20-9.58; predicted 9, 8-10),
+    harm median 5.45 m, max 6.41 m (predicted 5.9, max 6.6; H_max 6.8),
+    t_rng_self 8.25-9.60 s. Estimate error crosses the jump threshold at
+    ~37 s: ranging ~28 s earlier, v1 never.
+  P-B1-2 HOLDS: t_rng - t_jump = +2.88 / +2.82 (L10), +2.23 / +2.12 s (L30).
+  L3: ranging 6.48 / 7.62 s, harm 3.87 / 3.71 m, gps 6.18 / 6.20 s.
+    1 misattribution (L3 r1: victim's monitor flagged uav_1 at 6.47 s,
+    before its self flag at 8.49 s; peers flagged uav_0) = stated [2c]
+    limit; not in the decision (not L1).
+  P-B1-3 (DT+L1): peer path alone 8.52 / 7.33 s, harm 5.66 / 4.43 m.
+  nav_error_end ~ offset(W) in every attack flight; 0 contacts
+    (min peer separation 4.8-5.6 m).
+  P-B1-8 NOT MET as pre-registered: drift_itt over [t_ack, t0 + 120 s]
+    trust_aware 9.63 / 9.62 m > 7.91 m; proportionate 46.62 / 46.08 m
+    (predicted ~39); creep 0.063 / 0.057 m/s (< 0.5), vel_err 0.06;
+    action failures 0.
+  POST-HOC (scripts/h3_posthoc_s3_windows.py, 1 test; labelled, not in
+    the decision): the 7.91 m bound was calibrated on the H2 60 s
+    window. Truncated at t0 + 60 s: trust_aware 7.08 / 7.26 m (within),
+    proportionate 35.4 / 34.8 m; trust_aware keeps growing (+2.4 m over
+    the next 60 s), consistent with the zero-velocity hold following an
+    EKF velocity that carries part of a slow, absorbed spoof. For the
+    text: one sentence in limitations ("EKF velocity is also the
+    victim's data").
+Tests 1217 -> 1256 (VM). Amendments: none.
+
+Thesis presentation (agreed): the prereg keeps every outcome; the thesis
+text foregrounds H3 CONFIRMED, P-B1-2 and the peer-only detection, and
+gives S3 one sentence in the limitations.
+
+Review doc updated: P6, stage table (row 5), new section "Этап 5: полёты
+H3 (27–28.09)", journal.
+Next (new chat): step 4 — offline coverage map "speed x sigma_GNSS" (rules
+in H3_PREREGISTRATION.md "Offline coverage map"; data: b0_raw_runs,
+stage3_raw, h3_raw), then B1 text for chapters 3-4. After that no new
+flights are planned: stage 6 (chapter 3, literature P3/P9).
