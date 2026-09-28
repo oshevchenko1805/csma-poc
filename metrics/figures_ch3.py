@@ -11,6 +11,9 @@ Fig. 3.1  Data-dependency graph under a position-only GNSS spoof of one
 Fig. 3.3  Testbed deployment for one UAV i (п. 3.6.2, table 3.16):
           processes, ports, the command guard, the mesh node, and the
           ground-truth recorder outside the system under test.
+Fig. 3.4  Sequence of the self-healing loop in C for a spoof of uav_0
+          detected by a neighbour (п. 3.6.5): alarm, isolation announce,
+          coordinator election, recovery request, action, acknowledgement.
 Fig. 3.2  Placement of monitors and failure domains in architectures A,
           B and C (п. 3.3.3), with the properties O1–O3 of the operational
           CSMA definition (п. 3.2.1) under each panel.
@@ -474,11 +477,117 @@ def fig_deployment(outdir: str) -> None:
     _save(fig, outdir, "fig3_3_deployment")
 
 
+
+# ------------------------------------------------------------------ Fig. 3.4
+
+# lifelines: (label, x)
+LIFELINES = [
+    ("Монітор uav_1\n(сусід)", 0.85),
+    ("Координатор uav_1\n(обраний)", 2.55),
+    ("Процес uav_0\n(ціль)", 4.25),
+    ("PX4 uav_0", 5.80),
+]
+
+# messages in order: (step, src, dst, label, kind) — kind: mesh | local | reply
+SEQUENCE = [
+    (2, 0, 2, "оголошення ізоляції uav_0 (mesh, усім вузлам)", "mesh"),
+    (4, 1, 2, "запит відновлення: дія за причиною і політикою", "mesh"),
+    (5, 2, 3, "дія через контролер місії", "local"),
+    (5, 3, 2, "режим прийнято", "reply"),
+    (6, 2, 0, "підтвердження відновлення (mesh, усім вузлам)", "mesh"),
+]
+
+
+def fig_sequence(outdir: str) -> None:
+    y0, y1 = 0.12, 4.02
+    fig = plt.figure(figsize=(WIDTH_IN + 0.05, y1 - y0))
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(-0.02, WIDTH_IN + 0.03)
+    ax.set_ylim(y0, y1)
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    head_y, bw, bh, bottom = 3.50, 1.40, 0.42, 0.78
+    for k, (label, x) in enumerate(LIFELINES):
+        sec = k < 3
+        ax.add_patch(FancyBboxPatch((x - bw / 2, head_y), bw, bh,
+                                    boxstyle="round,pad=0,rounding_size=0.06" if sec
+                                    else "square,pad=0",
+                                    facecolor=DET_FILL if sec else "white",
+                                    edgecolor=DET_EDGE if sec else LINE,
+                                    linewidth=1.0 if sec else 0.8, zorder=3))
+        ax.text(x, head_y + bh / 2, label, ha="center", va="center", fontsize=8,
+                color=INK, zorder=4, linespacing=1.05)
+        ax.plot([x, x], [head_y, bottom], color=LINE, lw=0.8, ls=(0, (3, 2)), zorder=1)
+
+    X = [x for _l, x in LIFELINES]
+
+    def step_no(x, y, n):
+        ax.text(x, y, "①②③④⑤⑥⑦"[n - 1], ha="center", va="center", fontsize=9,
+                color=INK, zorder=6,
+                bbox=dict(boxstyle="circle,pad=0.05", fc="white", ec="none"))
+
+    def note(x, y, text, ha="left"):
+        ax.text(x, y, text, ha=ha, va="center", fontsize=7.5, color=INK_2,
+                style="italic", linespacing=1.05, zorder=5,
+                bbox=dict(boxstyle="square,pad=0.03", fc="white", ec="none"))
+
+    NUM_X = 0.20
+
+    # 1: alarm on the neighbour's monitor
+    y = 3.22
+    step_no(NUM_X, y, 1)
+    note(X[0] + 0.08, y, "тривога: перехресна перевірка\nабо перевірка за дальностями")
+
+    ys = {2: 2.82, 4: 2.02, 5: (1.66, 1.40), 6: 1.08}
+    for step, s, d, label, kind in SEQUENCE:
+        if step == 5:
+            y = ys[5][0] if kind == "local" else ys[5][1]
+        else:
+            y = ys[step]
+        a, b = (X[s], y), (X[d], y)
+        color = DET_EDGE if kind == "mesh" else LINE
+        ls = (0, (3, 2)) if kind == "reply" else "-"
+        ax.add_patch(FancyArrowPatch(a, b, arrowstyle="-|>", mutation_scale=8,
+                                     color=color, lw=1.1 if kind == "mesh" else 0.9,
+                                     linestyle=ls, shrinkA=0, shrinkB=0, zorder=2))
+        if kind == "mesh":   # delivered to every node: dots on the lifelines passed
+            lo, hi = sorted((s, d))
+            for k in range(lo + 1, hi):
+                ax.add_patch(plt.Circle((X[k], y), 0.035, color=color, zorder=3))
+        ax.text((a[0] + b[0]) / 2, y + 0.05, label, ha="center", va="bottom",
+                fontsize=7.5, color=color if kind == "mesh" else INK_2,
+                linespacing=1.05, zorder=5,
+                bbox=dict(boxstyle="square,pad=0.02", fc="white", ec="none"))
+        if kind != "reply":
+            step_no(NUM_X, y, step)
+
+    # 3: election on every coordinator
+    y = 2.42
+    step_no(NUM_X, y, 3)
+    note(X[1] + 0.08, y, "кожен вузол: uav_0 ізольовано → координатор — найменший\n"
+         "sysid серед живих неізольованих апаратів, тобто uav_1")
+    # 7: lift isolation
+    y = 0.90
+    step_no(NUM_X, y - 0.02, 7)
+    note(X[0] + 0.08, y - 0.02, "усі вузли знімають позначку ізоляції uav_0")
+
+    ax.text(0.02, 0.52, "A і B: ланцюг закінчується позначкою ізоляції в локальному стані "
+            "монітора (без оголошення в mesh); відновлення вимкнено.",
+            fontsize=7.5, color=INK, va="center")
+    ax.text(0.02, 0.28, "Перевірка за дальностями: тривогу подають монітори обох сусідів, "
+            "а монітор uav_0 позначає себе (п. 3.6.3).",
+            fontsize=7.5, color=INK, va="center")
+
+    _save(fig, outdir, "fig3_4_sequence")
+
+
 def _save(fig, outdir: str, name: str) -> None:
     os.makedirs(outdir, exist_ok=True)
     for ext in ("png", "pdf"):
         fig.savefig(os.path.join(outdir, "%s.%s" % (name, ext)),
-                    bbox_inches="tight", facecolor="white", dpi=300)
+                    bbox_inches="tight", facecolor="white", dpi=300,
+                    metadata={"CreationDate": None} if ext == "pdf" else None)
     plt.close(fig)
     print("  %s/%s.{png,pdf}" % (outdir, name))
 
@@ -490,6 +599,7 @@ def main(argv=None) -> int:
     fig_data_dependency(args.outdir)
     fig_architectures(args.outdir)
     fig_deployment(args.outdir)
+    fig_sequence(args.outdir)
     return 0
 
 

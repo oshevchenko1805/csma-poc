@@ -65,3 +65,22 @@ def test_deployment_figure_renders(tmp_path):
     F.fig_deployment(str(tmp_path))
     for ext in ("png", "pdf"):
         assert os.path.getsize(tmp_path / ("fig3_3_deployment." + ext)) > 0
+
+
+def test_sequence_matches_the_loop_in_3_6_5():
+    steps = [(st, F.LIFELINES[s][0].split("\n")[0], F.LIFELINES[d][0].split("\n")[0], k)
+             for st, s, d, _lab, k in F.SEQUENCE]
+    # announce, request and acknowledgement travel over the mesh; the action is local
+    assert [k for _s, _a, _b, k in steps] == ["mesh", "mesh", "local", "reply", "mesh"]
+    # the request comes from the elected coordinator (uav_1, not the isolated uav_0)
+    # and is executed by the target's own process
+    assert steps[1][1] == "Координатор uav_1" and steps[1][2] == "Процес uav_0"
+    assert [st for st, *_ in steps] == sorted(st for st, *_ in steps)
+
+
+def test_sequence_figure_renders_and_pdf_is_deterministic(tmp_path):
+    F.fig_sequence(str(tmp_path / "a"))
+    F.fig_sequence(str(tmp_path / "b"))
+    a = (tmp_path / "a" / "fig3_4_sequence.pdf").read_bytes()
+    b = (tmp_path / "b" / "fig3_4_sequence.pdf").read_bytes()
+    assert len(a) > 0 and a == b
