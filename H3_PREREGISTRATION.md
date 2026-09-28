@@ -485,7 +485,90 @@ attack flights).
 
 ## Amendments
 
-(none)
+**A1 (2026-09-28): offline coverage map, implementation choices.**
+Written after the H3 results, before any map code exists and before any
+map number is computed. The rules of "Offline coverage map" are
+unchanged; this entry fixes what they leave open, plus one input they
+assume that is not in the raw data.
+
+Reason: the mesh announcements (GLOBAL_POSITION_INT) are published but
+not logged. The monitors log GPS_RAW_INT, LOCAL_POSITION_NED and
+ESTIMATOR_STATUS only (checked on runs_h3), so the replay has to
+rebuild the announcements.
+
+1. **Input.** S1 flights only, as written (14: L1 x 5, L3 / L10 / L30 x 2,
+   no-attack x 3). S2 and S3 are not used. The B0 flights are not an
+   input of the map (they fed only [2b]). Calibration set: stage-3,
+   as in [2b]. SHA-256 of all three archives checked on 2026-09-28.
+2. **Announcements.** Rebuilt from each UAV's LOCAL_POSITION_NED (the
+   same EKF as GLOBAL_POSITION_INT), 3D, placed in the Gazebo world
+   frame by a per-UAV offset median(truth - belief) over [t0 - 45,
+   t0 - 1] s. The offset is computed on the logged belief **before** any
+   noise is added, so it cannot absorb the GNSS noise. Instants: 1 Hz
+   per UAV, with a phase phi_u ~ U[0, 1) s per (flight, seed, UAV).
+   Own position p_i = i's aligned belief at the announcement instant.
+3. **GNSS noise.** Per UAV, independent north and east first-order
+   Gauss-Markov processes, stationary sigma **per axis** (horizontal
+   RMS = sigma * sqrt 2), tau = 60 s, started from the stationary
+   distribution, on a 0.1 s grid (linear interpolation between grid
+   points). No vertical noise. One UAV's error is added both to its
+   announcements and to its own position as used by its own monitor
+   (one EKF produces both).
+4. **Ranges.** As live: r_ij = |x_i - x_j|_truth + b + n + nlos, with
+   n ~ N(0, 0.1^2), p_nlos 0.05, m_nlos 0.5 m. b in {0, 0.2, 0.4} m, the
+   same for every ordered pair; n and nlos drawn per ordered pair. Truth
+   is interpolated, never across a gap > 0.5 s.
+5. **Calibration of theta(sigma, b), theta_ok(sigma, b).** Stage-3,
+   window, data-quality gate, alignment and the max rule exactly as
+   [2b] / [2c]: theta = max sustained |rho| rounded up to 0.1 m + 0.5 m;
+   theta_ok = the same without the 0.5 m. The noise from items 3 and 4
+   is added after alignment. 50 seeds per flight, seed keys "map-cal|...";
+   evaluation keys are "map-eval|..." (disjoint). The (0, 0.2) cell uses
+   its recalibrated theta like every other cell; that value is reported
+   next to the live 1.8 m (it can differ: 50 seeds instead of 20).
+6. **Replay.** RangingConsistencyDetector unchanged, one per monitor,
+   constants theta(sigma, b), theta_ok(sigma, b), k = 3. t0 =
+   t_target_set (no-attack: the inject_start marker), W = 120 s.
+   Per (flight, seed): t_rng_peer, t_rng_self, t_rng, misattributions;
+   harm_at_alarm_m at t_rng by the B0 definition on the **logged** belief
+   (the spoof-induced error; the offline GNSS noise is not passed through
+   an EKF and exists without an attack, so it is not part of harm).
+7. **Outputs per (v0, sigma, b)**, pooled over flights x seeds of a level:
+   share of peer-path detection within W (with the flight count, not a
+   CI: seeds are not independent flights); median and p5-p95 of t_rng and
+   harm_at_alarm; misattributions (reported, not a map output).
+   False alarms: no-attack flights, window [t0 - 45, t0 + 120] s, every
+   ranging alarm, per flight-hour of replay (3 flights x 50 seeds x
+   165 s = 6.9 h per cell); if 0, the rule-of-three upper bound is
+   given as well.
+8. **Replay check, read before any map cell.** sigma = 0, b = 0.2 m,
+   live constants (theta 1.8, theta_ok 1.3). PASS iff (a) 0 ranging
+   alarms in the no-attack flights, and (b) in every attack flight of
+   S1, peer-path detection in >= 95 % of seeds and a median t_rng_peer
+   within +-1.5 s of the live value (live announcement phase up to 1 s,
+   plus the k = 3 granularity). FAIL: the replay does not represent the
+   live detector; this is reported and no map is produced.
+9. **The map predictions, operationalised now.** The wording stays; the
+   tests are:
+   - M1 "harm roughly flat in v0 for v0 <= 3 m/s": median harm(L3) /
+     median harm(L1) in [0.8, 1.25] at every (sigma, b). **Expected not
+     to hold at sigma = 0**, stated before computing: the frozen [2b]
+     numbers (5.9 vs 3.7 m) and the live flights (5.45 vs 3.8 m) already
+     differ by more. The wording was inconsistent with [2b] when written.
+     Reported as it comes.
+   - M2 "grows with theta(sigma)": for L1 and for L3, at every b,
+     median harm is non-decreasing in sigma (tolerance 0.1 m).
+   - "The boundary is a displacement (~ theta), not a speed" is M1 and M2
+     together and is not tested on its own. Taken literally, "~ theta" is
+     also contradicted by [2b] (harm 5.9 m vs theta 1.8 m; H_max = theta
+     + 5 m exists for that reason).
+   - M3 "at fast spoofs the alarm stays tied to t_jump": at L10 and L30,
+     for every (sigma, b), 0 (flight, seed) with t_rng < t_jump - 0.5 s
+     (the P-B1-2 rule), and t_rng - t_jump in [-0.5, +4] s in >= 95 %.
+10. **Limits added** (Ch. 4): the announcements are rebuilt from
+    LOCAL_POSITION_NED; the v0 axis has 4 points, three of them from
+    2 flights; one b for all pairs; the noise does not pass through the
+    EKF (as stated).
 
 ## Results
 
