@@ -2608,3 +2608,47 @@ the trust framing, measured boundaries) — literature check P3/P9.
 Next (new chat): B1 text for chapters 3-4 (H3 CONFIRMED, P-B1-2,
 peer-only detection under takeout, map + fig_h3_map; S3 and the map's
 not-met predictions briefly in limitations). Then stage 6.
+
+## REVIEW STAGE 5 (part 8) — step 5: B1 text in Ch. 4; stage 5 closed (2026-09-28)
+
+9935b92  thesis_text/CH4_V2_TEXT.md: new subsection 4.6 "Етап виявлення:
+  межа за швидкістю підміни і незалежне джерело даних (гіпотеза H3)":
+  4.6.1 B0 spoof-rate boundary (table 4.8; three EKF2 regimes; 1 m/s
+        blind, 48 m without alarm; cross_check silent from 3 m/s);
+  4.6.2 H3 design (detector in brief, theta 1.8, H_max 6.8, decision
+        rule, 20 flights, P-B1-2; ranging idea cited as known:
+        Mykytyn 2023, Bi 2024);
+  4.6.3 H3 CONFIRMED (table 4.9), P-B1-2 HOLDS, peer-only detection
+        under detector takeout. Narrow claim: only BOTH conditions work
+        together — check outside the victim's failure domain AND on
+        independent data (cross_check has the first, self path the second);
+  4.6.4 offline map (table 4.10, fig 4.5 = figures/fig_h3_map);
+  4.6.5 limits, brief: S3 (9.6 vs 46.4 m, 7.91 m bound not met),
+        M1/M3 not met, victim-monitor misattribution, Park & Yoo,
+        simulated ranges.
+  Also: intro, table 4.1 panel C, 4.2.2 (cross_check boundary now
+  measured), conclusion 6, principle-table row, final paragraph in the
+  trust framing. Renumbered: 4.6-4.8 -> 4.7-4.9, tables 4.8-4.12 ->
+  4.11-4.15. metrics/ch4_physical_tables.py still labels the
+  coordination table "4.8" (code untouched; noted in the file header).
+Tests 1282 unchanged (text only).
+
+Review doc updated: P6 closed (ch. 3 wording 3.1.6 and the detector
+description go into the new ch. 3), P16 closed (author: publications
+sufficient), stage table row 5, section "Этап 5: текст B1 и итог этапа
+(28.09)", journal.
+
+Decisions on text work:
+- Ch. 3 is rewritten whole in thesis_text/CH3_V2_TEXT.md (not patched in
+  the docx). Stage 6 starts with a per-subsection plan (keep / condense /
+  drop / add) for approval.
+- Transfer to docx once per chapter, whole; after that only the docx is
+  edited and that chapter's markdown is frozen; versioned docx copy
+  before each transfer.
+- Literature in a separate chat: pass 1 = verify and clean every source,
+  one list file; pass 2 = expand + DSTU 8302:2015. PRISMA vs "аналітичний
+  огляд" — author's decision. To add: Mykytyn 2023, Bi 2024, Park & Yoo
+  2026 (preprint).
+
+Stage 5 closed. No new flights planned.
+Next (new chat): stage 6 — plan of chapter 3.
