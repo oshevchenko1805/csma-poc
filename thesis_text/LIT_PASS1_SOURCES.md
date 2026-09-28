@@ -80,6 +80,24 @@
 
 Во всех пунктах L есть рабочие пометки «Key findings» / «Gap link» — убираются целиком. Ссылки на базы данных в 2.2 (голые домены IEEE Xplore, ACM DL, ScienceDirect, SpringerLink, MDPI) — не источники; 2.2 переписывается.
 
+### A, партия 4 (L№1–10) — проверено 28.09 по Crossref и arXiv
+
+| L№ | Проверка | Полные выходные данные (сверено) | Что изменилось относительно списка |
+|---|---|---|---|
+| 1 | **испр** | Kumar N., Chaudhary A. Surveying cybersecurity vulnerabilities and countermeasures for enhancing UAV security. *Computer Networks*. 2024. Vol. 252. Art. 110695. DOI: 10.1016/j.comnet.2024.110695 | Авторы (двое, не «et al.»), том, номер статьи, DOI |
+| 2 | **испр — другое название и год** | Spyros A., Chatzimisios P., Kavallieros D., Tsikrika T., Vrochidis S., Kompatsiaris Y. A Comprehensive Survey and Taxonomy of Cybersecurity Challenges and Proactive Measures for IoD. *ACM Computing Surveys*. 2026. Vol. 58, No. 7. P. 1–35. DOI: 10.1145/3785658 | **В списке название и год не совпадают со статьёй по DOI** («…cybersecurity concerns and threat modeling approaches of UAVs and the Internet of Drones», 2024). Работы с названием из списка не найдено. Цитировать по DOI; в тексте раздела 2 и CH3 год → 2026 |
+| 3 | **испр — найдены авторы** | Bai N., Hu X., Wang S. A survey on unmanned aerial systems cybersecurity. *Journal of Systems Architecture*. 2024. Vol. 156. Art. 103282. DOI: 10.1016/j.sysarc.2024.103282 | Авторы и журнал (были пустые); в тексте не цитируется |
+| 4 | **испр** | Hassija V., Chamola V., Agrawal A., Goyal A., Luong N. C., Niyato D., Yu F. R., Guizani M. Fast, Reliable, and Secure Drone Communication: A Comprehensive Survey. *IEEE Communications Surveys & Tutorials*. 2021. Vol. 23, No. 4. P. 2802–2832. DOI: 10.1109/COMST.2021.3097916 | Номер, страницы, DOI вместо ResearchGate |
+| 5 | **препринт** | Shrestha S. A Comprehensive Survey of Unmanned Aerial Systems' Risks and Mitigation Strategies : preprint. arXiv:2506.10327. 2025 | Один автор (не «et al.»); не рецензирован; в тексте не цитируется → **кандидат на удаление** |
+| 6 | **испр — опубликован** | Ceviz O., Sen S., Sadioglu P. A Survey of Security in UAVs and FANETs: Issues, Threats, Analysis of Attacks, and Solutions. *IEEE Communications Surveys & Tutorials*. 2025. Vol. 27, No. 5. P. 3227–3265. DOI: 10.1109/COMST.2024.3515051 | Статус «препринт?» снят: вышел в COMST 2025. В тексте не цитируется — сильный обзор, стоит процитировать в разделе 2 |
+| 7 | **испр** | Lu Y., Yang T., Zhao C., Chen W., Zeng R. A swarm anomaly detection model for IoT UAVs based on a multi-modal denoising autoencoder and federated learning. *Computers & Industrial Engineering*. 2024. Vol. 196. Art. 110454. DOI: 10.1016/j.cie.2024.110454 | Том, номер статьи, DOI |
+| 8 | **испр — опубликован** | Ceviz O., Sadioglu P., Sen S., Vassilakis V. G. A novel federated learning-based IDS for enhancing UAVs privacy and security. *Internet of Things*. 2025. Vol. 31. Art. 101592. DOI: 10.1016/j.iot.2025.101592 | Год «2023/2025» → 2025; авторы; журнал. В разделе 2 (2.4) цитируется как «Ceviz, 2023» со ссылкой на arXiv 2312.04135 → исправить на 2025 и журнал. (В arXiv journal-ref указан том 25 — расходится с Crossref; верен том 31 по Crossref) |
+| 9 | **испр** | Islam M. S., Mahmoud A. S., Sheltami T. R. AI-Enhanced Intrusion Detection for UAV Systems: A Taxonomy and Comparative Review. *Drones*. 2025. Vol. 9, No. 10. Art. 682. DOI: 10.3390/drones9100682 | Полное название (с подзаголовком), авторы, DOI |
+| 10 | **испр** | Akram J., Anaissi A., Othman W., Alabdulatif A., Akram A. DroneSSL: Self-Supervised Multimodal Anomaly Detection in Internet of Drone Things. *IEEE Transactions on Consumer Electronics*. 2024. Vol. 70, No. 1. P. 4287–4298. DOI: 10.1109/TCE.2024.3376440 | Полное название, авторы, выходные данные; в тексте не цитируется |
+
+**Итог партии 4:** 10 из 10 существуют; 9 рецензированы, 1 препринт (L№5). Главная находка: у **L№2 (Spyros)** название и год в списке не соответствуют статье — исправить по DOI (2026). L№6 и L№8 вышли в журналах — статус препринта снят.
+
+
 ---
 
 ## B. Цитируется в новых разделах 3–4, нет в списке L (13) — партия 1 проверена 28.09
@@ -201,6 +219,6 @@ Flueratoru 2020 GLOBECOM (Q6) — конференционная версия B�
 | 1 | B№1–13 — **готово 28.09** | закрывают [уточнити] в разделе 3 до переноса в docx; три ближайшие работы |
 | 2 | C№1–12 — **готово 28.09** | спуфинг, обход EKF, восстановление — ядро новизны |
 | 3 | C№13–21 — **готово 28.09** | архитектуры, кооперативная локализация, UWB |
-| 4 | L№1–10 | |
+| 4 | L№1–10 — **готово 28.09** | |
 | 5 | L№11–20 | |
 | 6 | L№21–30 | |
