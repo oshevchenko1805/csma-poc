@@ -157,6 +157,23 @@ Flueratoru 2020 GLOBECOM (Q6) — конференционная версия B�
 
 Попутно Crossref подтвердил страницы **B№11 Mykytyn 2023: P. 1–8** (Budva, Montenegro) и данные **B№12 Bi 2024**.
 
+### C, партия 3 (C№13–21) — проверено 28.09
+
+| C№ | Проверка | Полные выходные данные (сверено) | Примечание |
+|---|---|---|---|
+| 13 | **испр** | Ouiazzane S., Addou M., Barramou F. A Zero-Trust Model for Intrusion Detection in Drone Networks. *International Journal of Advanced Computer Science and Applications*. 2023. Vol. 14, No. 11. P. 525–537. DOI: 10.14569/IJACSA.2023.0141154 | Добавлен DOI; страницы — по PDF журнала |
+| 14 | **испр** | Wang X., Zhao Z., Yi L., Ning Z., Guo L., Yu F. R., Guo S. A Survey on Security of UAV Swarm Networks: Attacks and Countermeasures. *ACM Computing Surveys*. 2024. Vol. 57, No. 3. P. 1–37. DOI: 10.1145/3703625 | Авторы, том, год найдены (были неизвестны) |
+| 15 | **испр — две версии** | (а) журнальная: Li S., Shan F., Liu J., Coppola M., de Wagter C., de Croon G. C. H. E. Onboard Ranging-Based Relative Localization and Stability for Lightweight Aerial Swarms. *IEEE Robotics and Automation Letters*. 2025. Vol. 10, No. 10. P. 10066–10073. DOI: 10.1109/LRA.2025.3597039. (б) препринт v1: Li S., Coppola M., De Wagter C., de Croon G. C. H. E. An Autonomous Swarm of Micro Flying Robots with Range-based Relative Localization. arXiv:2003.05853v1. 2020 | **Внимание:** журнальная версия изменила название, авторов и содержание (13 дронов, 16 Гц). Числа из LIT_CHECK (5 Crazyflie; смещение b(d) = 0.072d + 0.62 м; 333 / 22 Гц; ненаблюдаемость в строю) — из v1. Если цитируем эти числа — ссылка на arXiv v1; если только идею — на RA-L 2025. Сейчас в тексте не цитируется |
+| 16 | **ок** | Güler S., Abdelkader M., Shamma J. S. Peer-to-Peer Relative Localization of Aerial Robots With Ultrawideband Sensors. *IEEE Transactions on Control Systems Technology*. 2021. Vol. 29, No. 5. P. 1981–1996. DOI: 10.1109/TCST.2020.3027627 | |
+| 17 | **испр** | Guo K., Li X., Xie L. Ultra-Wideband and Odometry-Based Cooperative Relative Localization With Application to Multi-UAV Formation Control. *IEEE Transactions on Cybernetics*. 2020. Vol. 50, No. 6. P. 2590–2603. DOI: 10.1109/TCYB.2019.2905570 | Полное название и DOI |
+| 18 | **испр** | Li Q., Wang P., Li X., Zhang J., Luo Y., Yu W., Cheng H. Formation-Constrained Cooperative Localization for UAV Swarms in GNSS-Denied Environments. *Sensors*. 2026. Vol. 26, No. 6. Art. 1984. DOI: 10.3390/s26061984 | Авторы и журнал найдены (было только PMC13029989) |
+| 19 | **испр (препринт)** | Pritzl V., Yu X., Westerlund T., Štěpán P., Saska M. Degradation-Aware Cooperative Multi-Modal GNSS-Denied Localization Leveraging LiDAR-Based Robot Detections : preprint. arXiv:2510.20480. 2025 | Полное название и авторы. Утверждение подтверждено: при одном обнаруженном соседе остаётся одна ненаблюдаемая степень свободы, при двух — снимается (разд. 3.5). Оговорка LIT_CHECK верна: LiDAR-обнаружения, не только дальности |
+| 20 | **ок** | DWM1000: 3.5–6.5 GHz Ultra-Wideband (UWB) Transceiver Module / Qorvo. URL: https://www.qorvo.com/products/p/DWM1000 (дата звернення: 28.09.2026). Даташит: DWM1000 Product Data Sheet, Rev. 2.0, 2016 | IEEE 802.15.4a; «precision of 10 cm»; <15 см (2D), <30 см (3D); 110 kbps / 850 kbps / 6.8 Mbps |
+| 21 | **ок** | DW3110: 6.5 & 8.0 GHz Ultra-Wideband (UWB) Transceiver IC / Qorvo. URL: https://www.qorvo.com/products/p/DW3110 (дата звернення: 28.09.2026). Даташит: DW3110 Product Data Sheet, Rev. 1.3, 2020 | IEEE 802.15.4z; «within 10 cm» для дальности; каналы 5 и 9 |
+
+**Итог группы C:** 21 из 21 существуют; препринты — C№19 (и v1 для C№15). Для раздела 2 решить: Mo & Sinopoli (C№7) — воркшоп или CDC 2010; Li et al. (C№15) — v1 или RA-L.
+
+
 
 ---
 
@@ -183,7 +200,7 @@ Flueratoru 2020 GLOBECOM (Q6) — конференционная версия B�
 |---|---|---|
 | 1 | B№1–13 — **готово 28.09** | закрывают [уточнити] в разделе 3 до переноса в docx; три ближайшие работы |
 | 2 | C№1–12 — **готово 28.09** | спуфинг, обход EKF, восстановление — ядро новизны |
-| 3 | C№13–21 | архитектуры, кооперативная локализация, UWB |
+| 3 | C№13–21 — **готово 28.09** | архитектуры, кооперативная локализация, UWB |
 | 4 | L№1–10 | |
 | 5 | L№11–20 | |
 | 6 | L№21–30 | |
