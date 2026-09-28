@@ -2549,3 +2549,62 @@ Next (new chat): step 4 — offline coverage map "speed x sigma_GNSS" (rules
 in H3_PREREGISTRATION.md "Offline coverage map"; data: b0_raw_runs,
 stage3_raw, h3_raw), then B1 text for chapters 3-4. After that no new
 flights are planned: stage 6 (chapter 3, literature P3/P9).
+
+## REVIEW STAGE 5 (part 7) — step 4: offline coverage map "speed x sigma_GNSS" (2026-09-28)
+
+Before computing (additive, no rule of the prereg changed):
+f8f5a34  H3 A1 (Amendments): the mesh announcements (GLOBAL_POSITION_INT)
+         are NOT logged (monitors log GPS_RAW_INT, LOCAL_POSITION_NED,
+         ESTIMATOR_STATUS) -> rebuilt from LOCAL_POSITION_NED, aligned to
+         the world frame before noise; GM GNSS noise per axis, tau 60 s,
+         on announcements and own position; range bias 0/0.2/0.4 m;
+         calibration seeds disjoint ("map-cal" / "map-eval"); replay
+         check before any map cell; map predictions operationalised
+         (M1 stated as expected NOT to hold at sigma 0: the wording
+         conflicted with the frozen [2b] numbers). B0 data not an input.
+32d9036  metrics/h3_offline_map.py (--check / --map) + 23 tests.
+Archives checked on the Mac: h3_raw a1746b37..., stage3_raw c419d204...,
+b0_raw_runs eb2d96ce... (all match).
+
+Replay check (sigma 0, b 0.2, theta 1.8/1.3, 50 seeds): PASS — peer
+detection 100 % in all 11 attack flights, |offline - live| t_rng_peer
+<= 0.84 s, 0 alarms in 150 no-attack replays. Same code reproduces the
+[2b] calibration (1.242 m -> 1.8 / 1.3).
+
+09c80bc  Results in H3_PREREGISTRATION.md ("Offline coverage map"):
+  theta ~ 6 sigma: 1.8 / 3.8 / 9.1 / 18.2 m (sigma 0/0.5/1.5/3, b 0.2);
+    slow GNSS error is not filtered by k = 3, the max rule puts theta
+    beyond its tail; b hardly matters.
+  Detection within W = 100 % in every cell; 0 false alarms (< 0.44 /h).
+  L1 harm at alarm 5.5 / 7.0 / 16.9 / 26.3 m; t_rng 8.5 / 10.2 / 22.7 /
+    40.4 s. v1 never fires at 1 m/s.
+  Misattributions: peers' monitors 0 everywhere; victim's own monitor
+    many under noise ([2c] limit much larger: 89-281 per 250 L1 replays).
+  L3 at sigma >= 0.5: alarms mostly after the EKF jump -> harm = estimate
+    error (~24-32 m), not physical displacement.
+  M1 NOT MET (0.69 at sigma 0 as stated; 1.2-3.5 with noise), M2 HOLDS,
+  M3 NOT MET (no alarm before the jump anywhere, but <= 4 s after it in
+    only 40 % / 4 % (L10, sigma 1.5 / 3), 88 % (L30, sigma 3)).
+  POST-HOC (scripts/h3_posthoc_m3_residual.py, 1 test): after the jump
+    the controller brings the ESTIMATE back to the route, the TRUE
+    position leaves it; the range-difference residual goes +16...+31 m
+    -> 0 at ~13-15 s -> ~-48 m while |e| stays 31-48 m. Large theta
+    misses the first phase -> alarm at 16-18 s. Property of the method.
+  Outputs (not in git): ~/Documents/csma/h3_map_out/ — h3_map.json
+    7bdc210a..., h3_map_check.json ba9584e3....
+3a0937f  metrics/figures_h3_map.py + figures/fig_h3_map.{png,pdf}
+  (a: theta and harm at 1 m/s vs sigma; b: time to alarm by speed),
+  ch4 style, sequential palette validated; number assigned with the text.
+Tests 1256 -> 1282 (VM).
+
+For the text: v1 silent at 1 m/s; ranging always detects within 120 s
+with 0 false alarms, but the harm it allows scales with GNSS quality
+under this calibration (~7 m at sigma 0.5 m, 17-26 m at 1.5-3 m):
+"bounded, measurable drift", not "solved". Attribution rests on the
+peer path. Novelty claims must stay narrow (ranging-based spoofing
+detection exists in the literature; ours = placement by failure domain,
+the trust framing, measured boundaries) — literature check P3/P9.
+
+Next (new chat): B1 text for chapters 3-4 (H3 CONFIRMED, P-B1-2,
+peer-only detection under takeout, map + fig_h3_map; S3 and the map's
+not-met predictions briefly in limitations). Then stage 6.
