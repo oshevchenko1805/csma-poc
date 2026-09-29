@@ -2694,3 +2694,51 @@ Open: Ch3 -> docx once (versioned copy first); literature in a separate
 chat (P3, P9 + refs flagged in the CH3 header); P13 glossary ("UAV" in
 Ch4 vs "апарат/БПЛА" in Ch3); P15 MTTD floor (Ch5); chapter 2.
 Next (new chat): Ch3 docx transfer or literature.
+
+## REVIEW STAGE 6 (part 2) — literature, pass 1 (2026-09-28/29)
+
+Pass 1 = verify every source, one list file: thesis_text/LIT_PASS1_SOURCES.md.
+Scope: old reference list L (30 items), refs of the new Ch3/Ch4 texts (13),
+sources of the novelty check LIT_CHECK_2026-09-27.md (21) -> ~61 unique.
+Metadata verified via Crossref (through the built-in browser on the Mac;
+cloud access to Crossref is rate-limited), publisher pages, arXiv.
+Result: all 61 exist. Serious errors in the old list (8): wrong authors
+L24 (Flammini 2021, not Eckhart & Ekelhart); wrong journal L15 (J. Systems
+Architecture), L22 (Environment Systems and Decisions), L25 (Neurocomputing);
+title/year differ from the DOI L2 (Spyros, ACM CSUR 2026); wrong venue and
+surname L14 (Andreoni Lopez, DCOSS 2021); no authors L3 (Bai 2024), L23
+(= Bashendy 2023). L26 duplicate. Preprints: Park & Yoo 2026, Shrestha 2025
+(L5, not cited), Pritzl 2025; Li et al. arXiv v1 vs RA-L 2025 (changed
+title/content). Commits 717d5ec, ff47ab7, f96c5cd, 5d546df, 9818937,
+e0c6c82, 3b63a5b.
+
+Author decisions: 2.2 = "аналітичний огляд" with a short search description
+and a comparison table (no PRISMA); no target number of sources; in-text
+refs stay [Author, year], final format per institution rules, applied once
+at the docx transfer; ATT&CK for ICS v19; Gartner = press release
+18.10.2021; Schneier 1999 = author's page with access date.
+
+24e61f6  Ch3/Ch4 citation fixes (step 1.4): Flammini 2021 (3x), Andreoni
+  Lopez (4x), Spyros 2026 (2x); all [уточнити] on literature removed; table
+  3.3 ATT&CK codes remapped by meaning to v19 (GNSS spoofing mapped by effect:
+  T0832, T0831; commands T0860, T1692.001, T0830; security-function disabling
+  T0881, T0878, T1691.002 ...); MAVLink key sentence (SETUP_SIGNING "can" be
+  sent over a secure link); Flueratoru conditions (DW1000 LOS 0 +/- 5 cm,
+  2-10 m office; NLOS concrete/human 0.48-0.56 m, journal version); Cardenas
+  2011 dropped; own-architecture sentence (3.2.3) without refs; domain MD4
+  softened + Psiaki & Humphreys 2016. Text only; tests 1295 unchanged.
+4140edd  NOVELTY_DRAFT (step 1.5): three items — developed: dependence on
+  data independence + failure domain; improved: recovery-action choice (H2,
+  compared with LOITER used in the work, 50.13 -> 1.53 m); improved: ranging
+  detection integrated in the CSMA loop (H3, "помилка навігації (відхилення
+  оцінки від істинного положення)" <= 6.41 m, 3 no-attack flights, simulated
+  ranges). No "вперше": B0 (n=2 per level), loss range 0.2-0.3, offline map,
+  methodology and the fast-detection paradox (times from different scenarios
+  and detectors, not a causal effect) moved to results/limits. Sensors 2022
+  (Sung et al., 22(23):9412) added as a pass-2 candidate.
+
+Review doc updated: P3 (pass 1 done), P4 note, P9 decision, stage table
+"Параллельно", section "Этап 6: литература, проход 1", journal.
+Next: plan of chapter 2 for approval (structure by self-healing loop stages,
+comparison-table columns, keep/drop list, where new works are needed) ->
+pass 2 -> chapter 2 text -> DSTU and one docx transfer.
