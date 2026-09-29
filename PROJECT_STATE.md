@@ -2742,3 +2742,29 @@ Review doc updated: P3 (pass 1 done), P4 note, P9 decision, stage table
 Next: plan of chapter 2 for approval (structure by self-healing loop stages,
 comparison-table columns, keep/drop list, where new works are needed) ->
 pass 2 -> chapter 2 text -> DSTU and one docx transfer.
+
+## REVIEW STAGE 6 (part 3) — chapter 2 plan, literature pass 2 batches 1-3 (2026-09-29)
+
+79d7e0e  CH2_PLAN.md approved: "аналітичний огляд" by self-healing loop
+  stages (2.1 search description, 2.2 threats and data trust, 2.3 detection,
+  2.4 response/recovery, 2.5 architectures and CSMA, 2.6 evaluation, 2.7
+  comparison table, 2.8 conclusions); drop L26, L5, L13, L28, L17; search
+  described as actually done, no selection counts.
+  LIT_PASS2_SOURCES.md batch 1: Kephart & Chess 2003, NIST SP 800-160v2r1,
+  SP 800-207, Kopetz & Steiner 2022, Wilson 1927, Holm 1979, Efron 1979,
+  Nosek 2018 (statistics in Ch3-4 had no refs).
+1ea9a63  batch 2: PX4 EKF2 innovation checks + Position Loss Failsafe (fires
+  only on an INVALID estimate), ArduPilot EKF failsafe (variances), PX4 /
+  Gazebo / MAVLink / MAVSDK / mavlink-router / ZeroMQ refs; Sung 2022 claim
+  verified in the paper text.
+429d1c4  batch 3: targeted search — no work combines check outside the
+  failure domain + recovery-action choice in a group + autopilot in the loop
+  + architecture comparison. New: Sharma 2026 (trusted-sensor control after
+  detection, single UAV, ArduPilot/MATLAB), Ranganathan ION GNSS+ 2023,
+  Tariq & Ahanger PeerJ CS 2026, Gil 2017, Kose 2026.
+842ed0f, fc3148a  CH2_TABLE_2_7.md: 10 closest works by the agreed columns;
+  conclusion = gap only; the "this work" row and limitations go to Ch5.
+  Sharma 2026 = one sentence in 2.4.
+HANDOFF_CH2.md for the new chat. Tests 1295 unchanged (text only).
+Next (new chat): chapter 2 text, subsection by subsection, in
+thesis_text/CH2_V2_TEXT.md.
