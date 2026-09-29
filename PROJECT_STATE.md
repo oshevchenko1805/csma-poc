@@ -2913,3 +2913,43 @@ Review doc: P15 closed; stage 7 row; new section "Этап 7: раздел 4
 Next: general conclusions -> Introduction (novelty from NOVELTY_DRAFT) ->
 title page, abstracts, TOC, abbreviations, appendices -> one proofreading
 pass (P13 glossary, P14).
+
+## REVIEW STAGE 7 (part 2) — general conclusions, Introduction, style rules (2026-09-29)
+
+Numbering as in docx -11/-12: review = Ch1, architecture/method/testbed = Ch2,
+results = Ch3, discussion = Ch4.
+Author decisions (29.09): thesis title "Сітчаста архітектура кібербезпеки
+(CSMA) з механізмом самовідновлення для критичних кіберфізичних систем";
+aim/object/subject approved (object: detection and self-healing processes in a
+UAV group "як критичній кіберфізичній системі"); test counts removed from the
+thesis text ("это для нас"); links to research programmes / implementation
+acts / co-authorship not emphasised for now; approbation and publications
+supplied by the author later.
+be091f2, 2619e00  thesis_text/CONCLUSIONS_TEXT.md: 8 points (tasks 1-6 of 1.8,
+  points 4-6 = novelty items 1-3; time metrics; design rules, limits,
+  transfer to other critical CPS, perspectives). Numbers only from 2.7, 3.6.3,
+  3.9, 4.5 (script-checked).
+b54e9f3  thesis_text/STYLE_RULES.md: rules against AI-style markers (dashes
+  instead of verbs, "setup: payoff" colons, "не X, а Y", Отже/Тобто starters,
+  short sentences, run-in heads, code identifiers), number/ref invariance
+  check. Baseline per 1000 words in -11: dashes Ch1 4.7, Ch2 15.6, Ch3 15.9,
+  Ch4 13.9; colon-payoff sentences Ch1 26, Ch2 72, Ch3 49, Ch4 9.
+122a8ed  thesis_text/INTRO_TEXT.md: relevance (5 paragraphs, refs checked
+  against Ch1), aim, 6 tasks, object, subject, methods (per task), novelty
+  (3 items, refs [13], [9; 54]), practical value; [уточнити] for programmes,
+  personal contribution, approbation, publications, repo link, volume.
+docx: ~/Downloads/Thesis Draft Semerenska-12_intro_concl.docx (SHA-256
+  09fe3fe7...), made from -11 (kept). ВСТУП before Ch1, ЗАГАЛЬНІ ВИСНОВКИ
+  before the reference list (Heading1, FirstParagraph/BodyText, Compact +
+  numId 1042 "1)", numId 1043/1044 "1."); [уточнити] highlighted yellow (9);
+  "1295 тестів" removed from 2.6.8 and 2.7. OOXML validation passed; 181 pages
+  (LibreOffice). 2.7 item-2 "loose bullet" is a pandoc artefact only (blank
+  bullet glyph renders as a continuation paragraph) — no fix needed.
+INTRO_TEXT.md and CONCLUSIONS_TEXT.md are frozen; edit the docx only.
+Tests 1301 unchanged (text only).
+Next (new chat): style pass per STYLE_RULES.md on the docx, one chapter per
+step (Ch1 -> Ch2 -> Ch3 -> Ch4), together with P13 (glossary, English terms,
+ГНСС vs GNSS, code identifiers) and P14; per chapter: list every dash /
+colon / "не…а" site by script, rewrite, verify numbers/refs/cross-refs
+unchanged. Then title page, abstracts, TOC, abbreviations, appendices;
+fill [уточнити] after the author supplies approbation/publications.
