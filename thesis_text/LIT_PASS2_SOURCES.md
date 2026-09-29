@@ -48,3 +48,14 @@
 **Пропозиція до NOVELTY_DRAFT (не внесено):** у п. 1 посилання «[Dash et al., 2024]» → «[Dash et al., 2024; Sharma et al., 2026]».
 
 Далі: заповнення таблиці 2.7 (читання найближчих робіт за стовпцями).
+
+## Партія 4 — статистика, додатково до партії 1 (29.09)
+
+| № | Перевірка | Повні вихідні дані | Для чого |
+|---|---|---|---|
+| N24 | **ок** (Crossref) | Newcombe R. G. Interval estimation for the difference between independent proportions: comparison of eleven methods. *Statistics in Medicine*. 1998. Vol. 17, No. 8. P. 873–890. DOI: 10.1002/(SICI)1097-0258(19980430)17:8<873::AID-SIM779>3.0.CO;2-I | розділи 3–4: інтервал Newcombe для різниці часток |
+| N25 | **ок** (Crossref) | Mann H. B., Whitney D. R. On a Test of Whether one of Two Random Variables is Stochastically Larger than the Other. *The Annals of Mathematical Statistics*. 1947. Vol. 18, No. 1. P. 50–60. DOI: 10.1214/aoms/1177730491 | розділи 3–4: критерій Манна–Вітні |
+
+Точний критерій Фішера — класичний, без окремого посилання (за потреби: Fisher R. A. The Design of Experiments, 1935).
+
+**Вставки в розділи 3–4 (29.09):** CH3 — Wilson, Newcombe, Holm, Mann & Whitney, Efron (примітка 3 до табл. метрик, п. 3.5.4); Nosek (п. 3.5.5); Koubaa (п. 3.1.2, MAVLink); Meier (PX4) і Koenig & Howard (Gazebo) (п. 3.5.2); MAVSDK, mavlink-router (п. 3.6.1–3.6.2); Hintjens (ZeroMQ, п. 3.6.4). CH4 — ті самі статистичні посилання в п. 4.1; «bootstrap … seed» → «бутстрепом із зафіксованим початковим значенням генератора» (P13).
