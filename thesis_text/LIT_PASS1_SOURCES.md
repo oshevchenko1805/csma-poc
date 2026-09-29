@@ -260,6 +260,8 @@ Flueratoru 2020 GLOBECOM (Q6) — конференционная версия B�
 
 ## Кандидаты прохода 2 (сейчас не проверяются)
 
+- Sung Y.-H., Park S.-J., Kim D.-Y., Kim S. GPS Spoofing Detection Method for Small UAVs Using 1D Convolution Neural Network. *Sensors*. 2022. Vol. 22, No. 23. Art. 9412. DOI: 10.3390/s22239412 — вихідні дані звірено з Crossref 29.09; за іншим чатом, описує відхід апарата в хибному напрямку при утриманні позиції за підміни GPS (у тексті статті не звірено). Для огляду: механізм, що мотивує H2.
+
 - Программные средства стенда: PX4 Autopilot, Gazebo (gz-sim 8), MAVSDK, MAVLink, mavlink-router, ZeroMQ — ссылки на документацию.
 - Failsafe PX4 и ArduPilot при недостоверной оценке позиции (из NOVELTY_DRAFT).
 - Работы о самовосстановлении роя и CPS с физическими метриками исхода (из NOVELTY_DRAFT).
