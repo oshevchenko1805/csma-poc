@@ -2953,3 +2953,39 @@ step (Ch1 -> Ch2 -> Ch3 -> Ch4), together with P13 (glossary, English terms,
 colon / "не…а" site by script, rewrite, verify numbers/refs/cross-refs
 unchanged. Then title page, abstracts, TOC, abbreviations, appendices;
 fill [уточнити] after the author supplies approbation/publications.
+
+## REVIEW STAGE 7 (part 3) — style pass Ch1-Ch4 in the docx (2026-09-29)
+
+docx: ~/Downloads/Thesis Draft Semerenska-16_style_ch4.docx (SHA-256
+  a1a8a18b...), made from -12 (kept) via -13 (Ch1), -14 (Ch2), -15 (Ch3),
+  -16 (Ch4); -13..-15 are intermediate. Only word/document.xml changed:
+  edits are exact string replacements inside each chapter's XML range, runs
+  and styles untouched.
+Result per STYLE_RULES.md (per 1000 words / counts, -12 -> -16):
+  dashes Ch1 8.4 -> 1.0, Ch2 17.0 -> 8.0, Ch3 17.2 -> 9.2, Ch4 15.3 -> 3.1;
+  colons Ch1 49 -> 16, Ch2 177 -> 63, Ch3 139 -> 20, Ch4 35 -> 7.
+  What remains is required: DSTU figure captions, figure legends, formula
+  keys, table notes, "—" in empty cells, quoted terms («повітря — земля»,
+  «автопілот — стенд — детектор»), the YAML listing, term-definition lists
+  (2.4, 3.1), colons before lists/formulas and labels (П1, О1, H1).
+  "не X, а Y": at most one per subsection, only in the main claim.
+  Table cells "так — X" / "так: X" -> "так (X)".
+  Connectors held at baseline (оскільки / бо / тобто per chapter = -12 +-1);
+  replacements use verbs, full stops, parentheses, participles, relative
+  clauses instead of "тобто/бо/оскільки".
+Author decisions: bold run-in heads stay; "mesh" stays for now.
+Checks (-12 vs -16): 386 paragraphs changed (Ch1 58, Ch2 179, Ch3 108,
+  Ch4 41); every paragraph outside Ch1-4 identical (Intro, conclusions,
+  references, appendices); per paragraph the multiset of numbers, [N] refs
+  and п./підрозділ/табл./рис./розділ refs unchanged (2 regex false positives:
+  trailing full stop); words 33773 -> 33858; OOXML validation passed;
+  181 pages, chapter starts unchanged (Ch2 p35, Ch3 p103, Ch4 p147,
+  conclusions p162, LibreOffice render).
+Not done (next): P13 glossary (ГНСС in Ch1 vs GNSS in Ch2-4; English
+  scenario names incl. headings 3.3.2 "Command injection" and 3.3.3
+  "GPS-пов'язані атаки"; "mesh"; code identifiers in running text and the
+  "Рисунок побудовано python3 -m metrics.figures_ch3" lines; Holm vs Холма
+  in табл. 4.3); P14 (sentences < 8 words; "Отже" 18 in Ch3).
+Tests 1301 unchanged (text only).
+Next (new chat): P13 + P14 on the -16 docx -> title page, abstracts, TOC,
+abbreviations, appendices -> fill [уточнити].
