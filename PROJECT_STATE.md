@@ -2856,3 +2856,23 @@ Next: P13 glossary + Ch4 wording in the docx -> Ch5 (incl. P15 MTTD floor)
 -> Ch1 -> Intro and general conclusions -> title page, abstracts, TOC,
 appendices (publications, repository link). Before the defence: peer-reviewed
 Park & Yoo, journal Sharma, full text Tariq & Shaukat.
+
+## REVIEW STAGE 6 (part 6) — chapters renumbered, no separate Chapter 1 (2026-09-29)
+
+Author decision (29.09): no separate Chapter 1 — the Introduction says what
+is needed; no institutional template. Renumbering: old Ch2 (analytic review)
+-> Ch1, Ch3 (architecture, method, testbed) -> Ch2, Ch4 (results) -> Ch3,
+planned Ch5 (discussion) -> Ch4; appendix Д stays Д.
+docx: ~/Downloads/Thesis Draft Semerenska-10_renumbered.docx (SHA-256
+e851c9cf...), made from -9 (kept as is). One scripted pass on the text:
+chapter headings and "розділ N" (95), subsection/item headings (86),
+п./пп./підрозділ refs, table/figure/listing captions and refs, equation
+numbers (11), section-ref cells of old tables 3.11 and 3.14 (now 2.11, 2.14).
+Checks: every п./підрозділ/табл./рис./лістинг reference points to an
+existing heading or caption; tables 1.1-1.3, 2.1-2.20, 3.1-3.15, Д.1-Д.3;
+figures 2.1-2.5, 3.1-3.5, Д.1; text length unchanged; OOXML validation
+passed. "розділ 4" (7 refs) = the discussion chapter still to be written.
+Markdown files CH2/3/4_V2_TEXT.md keep the OLD numbering (frozen).
+Next: Ch4 (discussion, incl. P15) -> general conclusions -> Introduction ->
+title page, abstracts, TOC, abbreviations, appendices -> one proofreading
+pass (P13 glossary, P14).
