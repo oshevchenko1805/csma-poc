@@ -2768,3 +2768,51 @@ pass 2 -> chapter 2 text -> DSTU and one docx transfer.
 HANDOFF_CH2.md for the new chat. Tests 1295 unchanged (text only).
 Next (new chat): chapter 2 text, subsection by subsection, in
 thesis_text/CH2_V2_TEXT.md.
+
+## REVIEW STAGE 6 (part 4) — chapter 2 text written (2026-09-29)
+
+thesis_text/CH2_V2_TEXT.md: chapter 2 "Аналітичний огляд" written whole,
+one subsection per step, by the approved CH2_PLAN.md (~6.3k words of text;
+60 works + 3 documentation pages cited, all verified in LIT_PASS1/LIT_PASS2).
+Content claims checked against abstracts (OpenAlex / Crossref via the
+built-in browser); full-text facts from LIT_CHECK. Own results are not
+disclosed in Ch2; the gap in 2.7 = the three novelty items.
+c51d949  2.1 goal, organising question (which data each stage relies on and
+  whether it stays trusted), questions P1-P4, search as actually done
+  (Crossref, IEEE Xplore, ACM DL, ScienceDirect, MDPI, arXiv; 2014-2026 +
+  foundational works; no selection counts), inclusion criteria.
+9a90131  2.2 threats and data trust (taxonomies by class/layer/technology;
+  GNSS spoofing compromises the estimate and every function relying on it).
+6e55ddb  2.3 detection: local/ML, EKF innovation check and its bypass (Mo et
+  al. 2010 CDC, Khazraei, Jung, Finn, Park & Yoo), cooperative ranging;
+  table 2.1 (data source x place of execution).
+9283414  2.4 response/recovery: frameworks; PX4/ArduPilot failsafe react to an
+  INVALID estimate; position hold is the attack channel (Kerns, Sung);
+  single-vehicle recovery by trusted data (Kong, Zhang, PID-Piper, DeLorean,
+  Sharma); group mitigation; cooperative localization (Li S. = RA-L 2025).
+3bdec48, 00989ef  2.5 architectures and CSMA (zero trust = access, not data
+  trust of a legitimate compromised node; CSMA only as principles).
+1dbdf09  2.6 evaluation: table 2.2; estimate-based metrics inherit spoofing;
+  preregistration (Nosek) not found in the reviewed UAV works.
+f73e683  2.7 table 2.3 (= CH2_TABLE_2_7.md, Jung cell corrected), one-sentence
+  distinction per work, four-feature gap, three open questions.
+98121c8  2.8 six conclusions, six research tasks (working version; align with
+  the introduction at stage 7).
+d95a8d6  consistency check: tables 2.1-2.3 final, cross-refs OK; 2.1 wording
+  aligned (six surveys cited at topic level — abstracts not reachable).
+df6691c  Ch3: "(підрозділ 2.7)" -> "(підрозділ 2.5)"; Kumar & Chaudhary 2024.
+c15df43  Ch3/Ch4 citation inserts: Wilson, Newcombe, Holm, Mann & Whitney,
+  Efron, Nosek, Koubaa, Meier (PX4), Koenig & Howard (Gazebo), MAVSDK,
+  mavlink-router, Hintjens (ZeroMQ); LIT_PASS2 N24-N25 (Newcombe 1998,
+  Mann & Whitney 1947, Crossref).
+
+Author decisions (29.09): Mo et al. 2010 = CDC with DOI; Li S. et al. = RA-L
+2025 (journal numbers only); Tariq & Shaukat 2026 not cited (open full text
+before the defence); Akram 2024 dropped (environmental anomalies, not attacks).
+Review doc: P9 closed; P3 note (left: DSTU 8302:2015 + one docx transfer);
+P13 note; stage table; new section "Этап 6: раздел 2 (29.09)"; journal.
+Tests 1295 unchanged (text only).
+Next (new chat): DSTU 8302:2015 for the reference list and one transfer of
+chapters 2-4 into the docx (versioned copy first). Before the defence: full
+text of Tariq & Shaukat 2026, peer-reviewed version of Park & Yoo, Kopetz &
+Steiner page for "fault-containment unit".
