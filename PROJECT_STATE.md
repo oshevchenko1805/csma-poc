@@ -2816,3 +2816,43 @@ Next (new chat): DSTU 8302:2015 for the reference list and one transfer of
 chapters 2-4 into the docx (versioned copy first). Before the defence: full
 text of Tariq & Shaukat 2026, peer-reviewed version of Park & Yoo, Kopetz &
 Steiner page for "fault-containment unit".
+
+## REVIEW STAGE 6 (part 5) — DSTU 8302:2015 reference list, one docx transfer of chapters 2-4 (2026-09-29)
+
+Author decisions (29.09): reference list in ALPHABETICAL order (Intro, Ch1,
+Ch5 are written later; order by first mention would renumber everything);
+in-text refs [N], [N, с. X], [N1; N2]; typical dissertation layout
+(TNR 14, 1.5 spacing, 1.25 cm indent); Ch3 title "АРХІТЕКТУРА CSMA ІЗ
+САМОВІДНОВЛЕННЯМ, МЕТОДИКА ОЦІНЮВАННЯ ТА ЕКСПЕРИМЕНТАЛЬНИЙ СТЕНД"; the
+repository is public, but its link is inserted separately later.
+f01bd26  pre-DSTU fixes: Ch3 [Phadke et al.] -> [Phadke & Medrano] (4);
+  Ch2 Sharma -> Authorea preprint 2024 (journal record not confirmed);
+  Kose 2.6 claim checked against the abstract; Abdulrazak: no LNCS volume
+  in Crossref (series without volume). Decisions appended to LIT_PASS2.
+6c6f202  thesis_text/REFERENCES_DSTU.md: 77 sources cited in Ch2-4
+  (70 publications + 7 web pages), alphabetical, DSTU 8302:2015; data from
+  LIT_PASS1/2 unchanged (every DOI/URL cross-checked); key -> number table
+  with per-chapter use; Ch2 Ceviz 2025 split into 2025a (FL-IDS, IoT) and
+  2025b (COMST survey). Not cited -> not listed: Kopetz & Steiner, Cardenas
+  2011, Shrestha, Akram, Kfir, Lu 2023, Patil, Tariq & Shaukat, Qorvo.
+docx: ~/Downloads/Thesis Draft Semerenska-9_ch2-4_transfer.docx
+  (SHA-256 a272c6ed...), built from CH2/CH3/CH4_V2_TEXT.md + REFERENCES_DSTU
+  (pandoc + style post-processing, outside the repo); the original
+  "Thesis Draft Semerenska + results.docx" (= -8_ch4_layout_review.docx,
+  b42fe830...) is untouched. The old docx held only old Ch2-4 + 30 REFERENCES,
+  so the body was replaced whole. Contents: Ch2-4, "СПИСОК ВИКОРИСТАНИХ
+  ДЖЕРЕЛ", "ДОДАТОК Д"; 41 tables, listing 3.1, 11 figures (PNG), ~154 pages.
+  Styles: Heading 1-3 (auto TOC), tables 12 pt (10 pt at >= 8 columns),
+  margins 25/15/20/20 mm, page number top right. Checks: 0 [Author, year]
+  left; all 1-77 cited; tables/figures numbered consecutively; word count
+  matches md; OOXML validation passed. 3 comments of O. Adamov (27.04) moved
+  with original dates: 3.1.1 (DFD), 3.5.2 (testbed refs), 3.6 (repo link —
+  still open).
+From now on Ch2-4 are edited in the docx only; CH2/3/4_V2_TEXT.md frozen.
+Review doc: P3 closed; P13 note (Ch4 English terms left); stage table;
+new section "Этап 6: ДСТУ 8302:2015 и перенос в docx (29.09)"; journal.
+Tests 1295 unchanged (text only).
+Next: P13 glossary + Ch4 wording in the docx -> Ch5 (incl. P15 MTTD floor)
+-> Ch1 -> Intro and general conclusions -> title page, abstracts, TOC,
+appendices (publications, repository link). Before the defence: peer-reviewed
+Park & Yoo, journal Sharma, full text Tariq & Shaukat.
