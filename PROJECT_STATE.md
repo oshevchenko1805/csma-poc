@@ -2989,3 +2989,47 @@ Not done (next): P13 glossary (ГНСС in Ch1 vs GNSS in Ch2-4; English
 Tests 1301 unchanged (text only).
 Next (new chat): P13 + P14 on the -16 docx -> title page, abstracts, TOC,
 abbreviations, appendices -> fill [уточнити].
+
+## REVIEW STAGE 7 (part 4) — P13 glossary and P14 sentence starters in the docx (2026-09-29)
+
+docx chain (all in ~/Downloads, each made from the previous one, earlier
+  files kept): -16_style_ch4 -> -17_p13_ch1 -> -18_p13_ch2 -> -19_p13_ch3
+  -> -20_p13_ch4 -> -21_p14_starters -> -22_intro_concl_terms (current,
+  SHA-256 b75227c8e008d790...). Only word/document.xml changed.
+P13 (glossary, thesis_text/GLOSSARY.md, 9606e9f/6de86fd/92c510f/abbd929):
+  GNSS -> ГНСС (first definition "(ГНСС, GNSS)"); English scenario names ->
+  підміна ГНСС / підміна команди / порушення зв'язку / вимкнення детекторів
+  (+ підміна ГНСС) / вимкнення домену моніторингу (+ підміна ГНСС), headings
+  3.3.2 "Підміна команди", 3.3.3 "Атаки на ГНСС: ..."; detector_takeout in
+  plural ("вимкнених локальних детекторів", per attacks/detector_takeout.py);
+  mesh split into сітчаста мережа (network, ch1/threat model) / сітчаста
+  архітектура (CSMA) / обмін між вузлами (stand exchange; first definition
+  2.6.4 "одноранговий обмін повідомленнями між моніторами через ZeroMQ");
+  metrics in Ukrainian with English only in table 2.13 (Recovery Success ->
+  "частка прогонів зі стабілізацією відхилення"); detectors "відсутності
+  HEARTBEAT" / "сторонніх команд" / "неузгодженості ГНСС за інновацією EKF2",
+  policies "пропорційна" / "з урахуванням довіри до даних" / "лише
+  виявлення"; code identifiers kept only in first definitions and technical
+  tables (2.9, 2.15, 2.17, 2.19, 3.1 corpus filters, 3.8, 3.9), VerbatimChar
+  style preserved; Wilson/Newcombe/Holm -> Вілсона/Ньюкомба/Холма, notation
+  p(Holm) kept (defined in 3.1); UAV -> апарати; figure-build commands,
+  commit hashes and script/data paths removed from the text, no appendix
+  (author decision); MITRE threat table (2.x) untouched; figures untouched,
+  captions/legends map the English figure labels. Scenario columns widened in
+  tables 3.3 and 3.7 A/B (total width unchanged; 3.7B headers still wrap).
+  Per-chapter change lists: thesis_text/P13_CH2/CH3/CH4_APPLIED.md.
+P14: sentence-initial Отже/Тому/Звідси max one per page (83 -> 60; Отже in
+  Ch3 18 -> 6, kept only where closing a subsection); paragraph "Отже,
+  результат H2 зумовлений саме вибором дії." removed (duplicate of the next
+  paragraph); short sentences left as is (author decision). 2ed4288,
+  thesis_text/P14_STARTERS_APPLIED.md.
+Intro and general conclusions aligned (GNSS, plural detectors, mesh);
+  "кібербезпеки"/"кіберзахисту" left where they are (author decision).
+Checks per step: paragraphs outside the edited range identical; per
+  paragraph the multiset of numbers, [N] and п./табл./рис. refs unchanged
+  (except removed hashes/commands, "EKF2"); no new run formatting; OOXML
+  validation passed; LibreOffice render 185 pages, chapter starts 7/36/105/
+  151/166.
+Tests 1301 unchanged (text only).
+Next: supervisor review of the whole draft. After it: title page, abstracts,
+  TOC, list of abbreviations, fill [уточнити].
