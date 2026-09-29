@@ -2876,3 +2876,40 @@ Markdown files CH2/3/4_V2_TEXT.md keep the OLD numbering (frozen).
 Next: Ch4 (discussion, incl. P15) -> general conclusions -> Introduction ->
 title page, abstracts, TOC, abbreviations, appendices -> one proofreading
 pass (P13 glossary, P14).
+
+## REVIEW STAGE 7 — chapter 4 (discussion) written, P15 closed (2026-09-29)
+
+Numbering as in docx -10: review = Ch1, architecture/method/testbed = Ch2,
+results = Ch3, discussion = Ch4 (no separate Chapter 1 beyond the review).
+4ebdd0f  metrics/mttd_decomposition.py + tests/test_mttd_decomposition.py
+  (6 tests) + thesis_text/MTTD_DECOMPOSITION.md. Inputs: campaign_master.csv
+  (ratio_first_cross_s) and physical_outcomes.csv only. Local detector:
+  MTTD - t_first = 1.96-2.05 s in 101/102 detections (median 1.993 s =
+  (k-1)/f, k=3, f~1 Hz); 1 exception C_gps_spoofing_r2 (4.08 s,
+  late_streak: 8 breaches, longest run 7). cross_check path (detector
+  takeout, C): MTTD - t_estimate_jump median +0.08 s [-0.89; +0.93], n=30.
+  Closes FINAL_RESULTS_AUDIT item 11 (R9 was N=1). Tests 1295 -> 1301.
+dc74a29 ... 51440a4  thesis_text/DISCUSSION_TEXT.md (~3.8k words):
+  4.1 answers to the three gap questions (-> novelty items 1-3), табл. 4.1
+  (features of табл. 1.3: nearest works vs "ця робота"), design
+  recommendations (3 paragraphs); 4.2 time metrics (formula 4.1, табл. 4.2);
+  4.3 limits of applicability (табл. 4.3; H2 > H1 > H3); 4.4 perspectives +
+  priorities (zero-velocity hold on a real platform; navigation by
+  neighbours; real UWB in a group of 5+); 4.5 conclusions (5 points).
+  Author decisions: Ch1 does not reveal own results -> "ця робота" in
+  табл. 4.1; recommendations folded into 4.1, so perspectives = 4.4.
+docx: ~/Downloads/Thesis Draft Semerenska-11_ch4.docx (SHA-256
+  49b0b140...), made from -10 (kept). Ch4 inserted before the reference
+  list (same styles: Heading1-2, FirstParagraph/BodyText, Назватаблиці,
+  TableText / TableTextSmall at 8 columns, numbered conclusions numId 1041).
+  Other edits: п. 2.6.3 "нижню межу ... близько 3 с" -> "(k - 1)/f ~ 2 с
+  (підрозділ 4.2)"; 1.7 sentence pointing to табл. 4.1; the 7 "розділ 4"
+  refs in Ch3 -> підрозділи 4.2 / 4.3 / 4.4. Checks: OOXML validation
+  passed; every п./підрозділ/табл./рис. reference in the document resolves;
+  169 pages (LibreOffice render).
+DISCUSSION_TEXT.md is frozen; from now on Ch4 is edited in the docx only.
+Review doc: P15 closed; stage 7 row; new section "Этап 7: раздел 4
+«Обговорення» (29.09)"; journal.
+Next: general conclusions -> Introduction (novelty from NOVELTY_DRAFT) ->
+title page, abstracts, TOC, abbreviations, appendices -> one proofreading
+pass (P13 glossary, P14).
