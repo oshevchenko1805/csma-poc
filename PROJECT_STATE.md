@@ -3033,3 +3033,47 @@ Checks per step: paragraphs outside the edited range identical; per
 Tests 1301 unchanged (text only).
 Next: supervisor review of the whole draft. After it: title page, abstracts,
   TOC, list of abbreviations, fill [уточнити].
+
+## REVIEW STAGE 8 — full review before the supervisor, fixes in docx -23 (2026-09-29)
+
+Numbering: review = Ch1, architecture/method/testbed = Ch2, results = Ch3,
+discussion = Ch4. Review steps done: 1 line threat model -> conclusions,
+2 claim strength vs N/design, 3 novelty as an opponent sees it,
+4 literature, 5 numbers (re-computed from campaign_master.csv,
+collision_flags.csv, fp_census.csv: all match). Steps 6 (DSTU) and
+7 (style) skipped by author decision. Findings R1-R28 in the review doc
+(section "Этап 8"); R26-R28 and the H2-scope / C-B wording came from an
+external (ChatGPT) review and were confirmed against the text and repo.
+Author decisions: R1 aim/novelty wording accepted (detection: data
+independent of the compromised node + check outside its failure domain;
+recovery: action does not rely on data the attack compromised); R19 -
+early-detection paradox added as evidence inside novelty item 1 (not a
+separate item); R20 (own publications) at the very end.
+docx: ~/Downloads/Thesis Draft Semerenska-23_full_review.docx (SHA-256
+  2c2551bd7945b63f...), made from -22 (kept). 38 paragraphs changed, the
+  other 2802 identical; new numbers/refs only from the body (3.6.3-3.6.5,
+  табл. 3.7, п. 2.3.3, п. 3.3.1); no replacement spans mixed run
+  formatting; LibreOffice render 189 pages (was 185), starts 8/37/107/153,
+  conclusions 169.
+Closed: R1-R6, R8-R19, R24-R28 (R7 merged into R12). Main content:
+  H1 and command-injection contrast stated as expected by construction
+  in intro/conclusions; H1 not pre-registered (2.5.5 fixed); H2 scope =
+  fast spoof, action before the estimate jump (slow 1 m/s: 9.6 m, bound
+  7.91 m not met); H3 with Wilson CI 0.57-1.00, 3 no-attack flights,
+  "demonstration of a limit", sigma 1.5-3 m -> 17-26 m; novelty 2 vs
+  [13; 69], novelty 3 vs [9; 54]; adversary model (velocity not spoofed)
+  justified in 2.1.2 via constant-offset spoofing vs drag-off [34];
+  CSMA role: exchange carries neighbours' announcements, so cross-check
+  and ranging check are impossible in B; C-B = "advantage not found";
+  drift 50 m in all cells -> navigation error 50 m, C drift 8.4 m in
+  detector takeout; comm disruption named outside the contribution;
+  "рій" -> "група" for the testbed (3.7); calibration 130 of 131 runs.
+  Before/after list: thesis_text/REVIEW8_APPLIED.md.
+Open: R20 own publications (end); R21 Ukrainian sources, R22 Tippenhauer
+  CCS 2011 + SAVIOR USENIX Sec 2020, R23 full texts of [32], [50], [73]
+  (Michieletto [50] first) - one literature pass with one [N] renumbering.
+  Not checked: DSTU formatting, appendix letter "Д", volume (~7.4 author's
+  sheets incl. tables), style, [уточнити].
+Tests 1301 unchanged (text only).
+Next: author reads -23 (novelty items, conclusions 4-6, 2.1.2) -> literature
+  pass R21-R23 -> supervisor.
