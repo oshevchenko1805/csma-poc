@@ -3077,3 +3077,24 @@ Open: R20 own publications (end); R21 Ukrainian sources, R22 Tippenhauer
 Tests 1301 unchanged (text only).
 Next: author reads -23 (novelty items, conclusions 4-6, 2.1.2) -> literature
   pass R21-R23 -> supervisor.
+
+## REVIEW STAGE 9 — final assessment and fixes in docx -24 (2026-09-30)
+
+Final whole-work assessment of -23 (Claude + external ChatGPT review): ready for
+the supervisor after one small package. Found that the R28/R19 fix in -23 was
+unsuccessful (inverted "результат визначає момент" + causal "Показано" vs 4.2
+"не ізольовано"), R1 residue in 4.3, "B частково" vs table 2.5 (compromised
+node vs attacked vehicle), "лише" in 4.5 п.3 / висновок 8, 4.2 "різні опорні
+події" (both MTTD are from attack start; ChatGPT), stale "4.2.4" in table 2.11.
+Author decisions: all fixes in neutral wording; 2.1.2 narrowed to "в
+усталеному режимі"; no explicit 123-specialty sentence; Додаток Д -> Додаток А.
+docx: ~/Downloads/Thesis Draft Semerenska-24_final_fixes.docx (SHA-256
+  4f1d311e1dc4d715...), made from -23 (kept). 51 paragraphs changed, 2789
+  identical; no new numbers; [N] unchanged; OOXML valid; LibreOffice render
+  190 pages, starts 8/37/107/153, conclusions 169, appendix 187.
+  Appendix also cleaned per GLOSSARY (Ukrainian scenario names, no mesh/Wilson/
+  GPS-детектор/UAV, code path removed). Before/after: thesis_text/REVIEW9_APPLIED.md.
+Open (unchanged): R20 own publications (end), R21-R23 literature pass,
+  [уточнити], DSTU formatting.
+Tests 1301 unchanged (text only).
+Next: send -24 to the supervisor.
